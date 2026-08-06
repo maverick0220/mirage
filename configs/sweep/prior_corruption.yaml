@@ -1,0 +1,5 @@
+parameters:
+  edge_flip_rate: [0.0, 0.1, 0.2, 0.3, 0.5]
+  sign_flip_rate: [0.0, 0.1, 0.2, 0.3]
+seeds: [2026, 2027, 2028, 2029, 2030]
+

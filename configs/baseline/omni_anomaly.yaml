@@ -1,0 +1,5 @@
+name: omnianomaly
+adapter: mirage.baselines.anomaly.omni_anomaly.OmniAnomalyAdapter
+vendor: vendor/omnianomaly
+threshold_selection: validation_only
+

@@ -1,0 +1,5 @@
+name: anomaly_transformer
+adapter: mirage.baselines.anomaly.anomaly_transformer.AnomalyTransformerAdapter
+vendor: vendor/anomaly_transformer
+threshold_selection: validation_only
+

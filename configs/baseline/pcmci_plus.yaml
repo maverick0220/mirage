@@ -1,0 +1,5 @@
+name: tigramite_pcmciplus
+adapter: mirage.baselines.causal.pcmci_plus.PCMCIPlusAdapter
+vendor: vendor/tigramite_pcmciplus
+threshold_selection: validation_only
+

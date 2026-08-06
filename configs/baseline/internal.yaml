@@ -1,0 +1,9 @@
+causal:
+  - lagged_correlation
+anomaly:
+  - robust_zscore
+  - linear_residual
+external:
+  enabled: false
+  fail_on_missing: true
+

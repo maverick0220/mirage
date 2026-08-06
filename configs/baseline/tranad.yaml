@@ -1,0 +1,5 @@
+name: tranad
+adapter: mirage.baselines.anomaly.tranad.TranADAdapter
+vendor: vendor/tranad
+threshold_selection: validation_only
+

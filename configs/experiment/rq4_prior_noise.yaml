@@ -1,0 +1,22 @@
+# RQ4: prior robustness under corruption.
+# Runnable core runs the synthetic SCM with the default (uncorrupted) prior;
+# the corruption sweep (corruptor module) is not yet wired into the runner.
+research_question: RQ4_prior_robustness
+dataset: synthetic_closed_loop_scm
+seed: 2026
+data_dir: data/processed/synthetic/default
+run_dir: artifacts/rq4_prior_noise
+model_config: configs/model/mirage.yaml
+batch_size: 128
+num_workers: 0
+max_epochs: 50
+accelerator: auto
+devices: 1
+deterministic: true
+fast_dev_run: false
+limit_train_batches: 1.0
+limit_val_batches: 1.0
+# --- planned sweep (not executed by the current runner) ---
+corruption_rates: [0.0, 0.1, 0.2, 0.3, 0.5]
+knowledge_modes: [none, hard, soft]
+seeds: [2026, 2027, 2028, 2029, 2030]

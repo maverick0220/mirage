@@ -1,0 +1,76 @@
+Metadata-Version: 2.4
+Name: mirage-industrial
+Version: 1.0.0
+Summary: Mechanism-informed regime-adaptive causal anomaly analysis for industrial time series
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=2.0
+Requires-Dist: pandas>=2.2
+Requires-Dist: scipy>=1.13
+Requires-Dist: scikit-learn>=1.5
+Requires-Dist: networkx>=3.2
+Requires-Dist: pyarrow>=16
+Requires-Dist: PyYAML>=6.0
+Requires-Dist: requests>=2.31
+Requires-Dist: torch>=2.6
+Requires-Dist: lightning<3,>=2.5
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"
+Requires-Dist: pytest-cov>=5; extra == "dev"
+Provides-Extra: tigramite
+Requires-Dist: tigramite>=5.2; extra == "tigramite"
+
+# MIRAGE 工业时序因果异常分析工程
+
+本工程是论文《文章初稿-V1.0.md》与《MIRAGE实验落地实现方案-V1.0.md》的可执行实现。主线面向一般工业设备：从工艺角色和机理约束出发，学习工况自适应动态因果图，以条件机制残差检测异常，并通过因果路径与反事实干预给出根因排序。发电锅炉仅作为实际工业验证场景。
+
+## 快速开始
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python -m pip install -e ".[dev]"
+.venv\Scripts\mirage generate-scm --config configs/data/synthetic_smoke.yaml
+.venv\Scripts\mirage train --config configs/experiment/smoke.yaml
+.venv\Scripts\mirage evaluate --run-dir artifacts/smoke
+```
+
+> 注意：`smoke.yaml` 的训练数据来自 `configs/data/synthetic_smoke.yaml`（`data/processed/synthetic/smoke`）。
+> 不要用 `synthetic.yaml` 生成的数据直接训练 smoke（目录不匹配会报 FileNotFoundError）。
+> 完整合成主数据用 `configs/data/synthetic.yaml`（产出 `data/processed/synthetic/default`），
+> 对应实验配置为 `configs/experiment/synthetic_main.yaml`。
+
+锅炉样例已放在 `data/raw/boiler/sample/`。ESS 公开数据与外部基线均通过可审计清单按需获取：
+
+```powershell
+.venv\Scripts\python scripts/download_ess.py --quicklook
+.venv\Scripts\python scripts/fetch_baselines.py --list
+.venv\Scripts\python scripts/verify_external.py
+```
+
+完整命令、文件职责、全年锅炉实验和论文回填关系详见 [MIRAGE实验落地实现方案-V1.0.md](MIRAGE实验落地实现方案-V1.0.md)。
+
+## 数据边界
+
+- `data/raw/boiler/sample/数据样例.csv` 是约 5.8 天、10 万行的接口验证样例；论文主实验应切换为不入库的全年数据路径。
+- 合成闭环 SCM 可直接生成，包含真值动态图、工况和故障事件。
+- ESS quicklook 可自动下载；完整数据需显式指定 `--full`，避免无意下载大文件。
+- 时间划分统一采用 train→validation→test 的严格时序切分；任何拟合型变换仅在训练集拟合。
+
+## 质量门禁
+
+```powershell
+.venv\Scripts\python -m pytest
+.venv\Scripts\mirage audit --source boiler --input "data/raw/boiler/sample/数据样例.csv" --nrows 5000
+.venv\Scripts\mirage generate-scm --config configs/data/synthetic_smoke.yaml
+.venv\Scripts\mirage train --config configs/experiment/smoke.yaml
+```
+
+
+
+## 外部基线边界
+
+10 个基线官方仓库固定在 `vendor/`，提交号见 `vendor/baseline_manifest.json`。PCMCI+ 已提供主环境可执行适配并纳入契约测试；其余旧框架通过 `ExternalJobSpec` 导出统一 train/validation/test 输入，在各自固定环境运行后导回 `[lag, source, target]` 图或标准分数表，从而避免依赖冲突和测试标签泄漏。`scripts/verify_external.py` 同时核验数据哈希、仓库提交和许可证状态。当前 PCMCI-Ω 上游固定提交未包含许可证文件，复现研究可保留提交证据，但任何再分发前必须人工审查许可。
+
+## 全年锅炉入口
+
+`configs/data/boiler_full_year.yaml` 启用两遍式有界内存处理：第一遍完成字段缺失和时间审计，第二遍按月写 Parquet，并按冻结日期形成连续 train/validation/test。配置中的日期只是模板，必须在全年数据质检后冻结。初始角色映射来自实现方案第 11.2 节，所有未确认字段保留为 `unknown`，不得凭相关性自动改写专家语义。

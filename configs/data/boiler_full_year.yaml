@@ -1,0 +1,14 @@
+source: boiler
+input_path: data/raw/boiler/full_year/boiler_2020.csv
+encoding: utf-8-sig
+timestamp_column: Time
+sample_period_seconds: 5
+chunk_size: 200000
+streaming: true
+split_dates:
+  train_end: 2020-08-01T00:00:00
+  validation_end: 2020-10-01T00:00:00
+missing_limit: 0.30
+output_dir: data/processed/boiler/full_year_2020
+note: Replace dates after full-year audit; keep contiguous time blocks and an isolation gap if labels permit.
+

@@ -1,0 +1,11 @@
+variables:
+  - {name: load_context, role: context}
+  - {name: setpoint, role: setpoint}
+  - {name: actuator_command, role: actuator_command}
+  - {name: actuator_feedback, role: actuator_feedback}
+  - {name: process_0, role: output}
+expected_edges:
+  - {source: load_context, target: setpoint, sign: 1, confidence: 0.9, lag_seconds: [5, 30]}
+  - {source: setpoint, target: actuator_command, sign: 1, confidence: 0.9, lag_seconds: [5, 20]}
+  - {source: actuator_command, target: actuator_feedback, sign: 1, confidence: 0.95, lag_seconds: [5, 30]}
+

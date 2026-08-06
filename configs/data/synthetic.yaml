@@ -1,0 +1,12 @@
+seed: 2026
+n_steps: 12000
+n_variables: 12
+n_regimes: 3
+max_lag: 3
+sample_period_seconds: 5
+train_ratio: 0.60
+val_ratio: 0.20
+anomaly_rate: 0.035
+split_embargo: 68
+output_dir: data/processed/synthetic/default
+

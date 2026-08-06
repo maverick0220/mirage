@@ -1,0 +1,11 @@
+seed: 7
+n_steps: 960
+n_variables: 8
+n_regimes: 2
+max_lag: 2
+sample_period_seconds: 5
+train_ratio: 0.60
+val_ratio: 0.20
+anomaly_rate: 0.05
+output_dir: data/processed/synthetic/smoke
+

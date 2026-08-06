@@ -1,0 +1,15 @@
+seed: 7
+name: smoke
+data_dir: data/processed/synthetic/smoke
+run_dir: artifacts/smoke
+model_config: configs/model/mirage_small.yaml
+batch_size: 32
+num_workers: 0
+max_epochs: 1
+accelerator: cpu
+devices: 1
+deterministic: true
+fast_dev_run: false
+limit_train_batches: 4
+limit_val_batches: 2
+

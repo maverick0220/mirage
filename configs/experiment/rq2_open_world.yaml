@@ -1,0 +1,22 @@
+# RQ2: open-world anomaly detection (unseen regimes / unknown faults).
+# Runnable core targets the synthetic SCM; ESS/boiler scans are planned but not
+# wired into the runner (see 代码审查报告 P0-2).
+research_question: RQ2_open_world_detection
+seed: 2026
+data_dir: data/processed/synthetic/default
+run_dir: artifacts/rq2_open_world
+model_config: configs/model/mirage.yaml
+batch_size: 128
+num_workers: 0
+max_epochs: 50
+accelerator: auto
+devices: 1
+deterministic: true
+fast_dev_run: false
+limit_train_batches: 1.0
+limit_val_batches: 1.0
+# --- planned sweep (not executed by the current runner) ---
+datasets: [synthetic_closed_loop_scm, ess, boiler_full_year]
+holdout: unseen_regime_combination
+metrics: [event_f1, range_auprc, false_alarms_per_day, delay, novelty_auroc]
+seeds: [2026, 2027, 2028, 2029, 2030]

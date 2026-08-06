@@ -1,0 +1,2 @@
+[console_scripts]
+mirage = mirage.cli.main:main

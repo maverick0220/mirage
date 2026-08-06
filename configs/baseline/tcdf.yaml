@@ -1,0 +1,5 @@
+name: tcdf
+adapter: mirage.baselines.causal.tcdf.TCDFAdapter
+vendor: vendor/tcdf
+threshold_selection: validation_only
+

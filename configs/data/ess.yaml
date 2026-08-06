@@ -1,0 +1,8 @@
+source: ess
+data_path: data/external/ess/quicklook/preprocessedData.csv
+adjacency_path: data/external/ess/quicklook/adjMatrix.csv
+sample_period_seconds: 1
+train_ratio: 0.60
+val_ratio: 0.20
+output_dir: data/processed/ess/default
+

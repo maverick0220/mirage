@@ -1,0 +1,23 @@
+# RQ3: root-cause ranking (Hit@K / MRR / path F1).
+# Runnable core targets the synthetic SCM. Root-cause metrics and the
+# counterfactual module are implemented but not yet wired into `evaluate`
+# (see 代码审查报告 P0-4).
+research_question: RQ3_root_cause
+seed: 2026
+data_dir: data/processed/synthetic/default
+run_dir: artifacts/rq3_root_cause
+model_config: configs/model/mirage.yaml
+batch_size: 128
+num_workers: 0
+max_epochs: 50
+accelerator: auto
+devices: 1
+deterministic: true
+fast_dev_run: false
+limit_train_batches: 1.0
+limit_val_batches: 1.0
+# --- planned sweep (not executed by the current runner) ---
+datasets: [synthetic_closed_loop_scm, boiler_full_year]
+methods: [mirage, graph_residual_reference]
+metrics: [hit_at_1, hit_at_3, hit_at_5, mrr, counterfactual_recovery]
+expert_blind_review: true

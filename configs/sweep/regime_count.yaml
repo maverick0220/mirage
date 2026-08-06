@@ -1,0 +1,3 @@
+parameter: model.n_regimes
+values: [1, 3, 5, 8]
+

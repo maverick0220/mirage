@@ -1,0 +1,21 @@
+# Canonical external-resource manifest. Runtime scripts also accept configs/external_sources.yaml.
+ess:
+  license: "MIT for repository code; dataset terms are recorded by the Zenodo deposit"
+  repository: https://github.com/soerenwengel/essdata
+  quicklook:
+    data: https://raw.githubusercontent.com/soerenwengel/essdata/main/preprocessedData.csv
+    adjacency: https://raw.githubusercontent.com/soerenwengel/essdata/main/adjMatrix.csv
+  full_record: https://zenodo.org/records/10641290
+  reduced_archive: https://zenodo.org/records/10679737/files/accp_dataset_reduced.zip?download=1
+baselines:
+  tigramite_pcmciplus: https://github.com/jakobrunge/tigramite.git
+  dynotears_causalnex: https://github.com/mckinsey/causalnex.git
+  tcdf: https://github.com/M-Nauta/TCDF.git
+  pcmci_omega: https://github.com/CausalML-Lab/PCMCI-Omega.git
+  cdans: https://github.com/hferdous/CDANs.git
+  omnianomaly: https://github.com/NetManAIOps/OmniAnomaly.git
+  mtad_gat: https://github.com/ML4ITS/mtad-gat-pytorch.git
+  gdn: https://github.com/d-ailin/GDN.git
+  tranad: https://github.com/imperial-qore/TranAD.git
+  anomaly_transformer: https://github.com/thuml/Anomaly-Transformer.git
+

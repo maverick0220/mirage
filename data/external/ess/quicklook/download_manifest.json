@@ -1,0 +1,14 @@
+[
+  {
+    "url": "https://raw.githubusercontent.com/soerenwengel/essdata/main/preprocessedData.csv",
+    "path": "data\\external\\ess\\quicklook\\preprocessedData.csv",
+    "bytes": 10728957,
+    "sha256": "a16d4adc50c1dcbcfa19cf9163b0d32e5ed84fcb9f29f0fbc5dbb598ef7dc632"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/soerenwengel/essdata/main/adjMatrix.csv",
+    "path": "data\\external\\ess\\quicklook\\adjMatrix.csv",
+    "bytes": 1289,
+    "sha256": "3042d4ede05822ba523389ae65c5b247aa5b822bc0f0c1822637106e038b0433"
+  }
+]

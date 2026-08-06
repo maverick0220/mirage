@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mirage-industrial"
+version = "1.0.0"
+description = "Mechanism-informed regime-adaptive causal anomaly analysis for industrial time series"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=2.0",
+  "pandas>=2.2",
+  "scipy>=1.13",
+  "scikit-learn>=1.5",
+  "networkx>=3.2",
+  "pyarrow>=16",
+  "PyYAML>=6.0",
+  "requests>=2.31",
+  "torch>=2.6",
+  "lightning>=2.5,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov>=5"]
+tigramite = ["tigramite>=5.2"]
+
+[project.scripts]
+mirage = "mirage.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "smoke: end-to-end smoke tests",
+  "integration: integration tests",
+  "contract: external-adapter contract tests",
+]
+

@@ -1,0 +1,13 @@
+window_size: 32
+max_lag: 2
+n_regimes: 2
+hidden_dim: 32
+regime_temperature: 0.8
+student_t_df: 5.0
+prior_weight: 0.05
+sparsity_weight: 0.001
+delta_weight: 0.001
+acyclicity_weight: 0.0
+learning_rate: 0.001
+weight_decay: 0.0001
+

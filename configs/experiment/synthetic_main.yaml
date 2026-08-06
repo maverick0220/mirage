@@ -1,0 +1,15 @@
+seed: 2026
+name: synthetic_main
+data_dir: data/processed/synthetic/default
+run_dir: artifacts/synthetic_main
+model_config: configs/model/mirage.yaml
+batch_size: 128
+num_workers: 0
+max_epochs: 50
+accelerator: auto
+devices: 1
+deterministic: true
+fast_dev_run: false
+limit_train_batches: 1.0
+limit_val_batches: 1.0
+

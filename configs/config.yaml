@@ -1,0 +1,9 @@
+project: mirage-industrial
+seed: 2026
+data_root: data
+artifact_root: artifacts
+report_root: reports
+deterministic: true
+graph_orientation: source_to_target
+tensor_layout: batch_window_variable
+

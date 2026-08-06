@@ -1,0 +1,25 @@
+# RQ1: causal structure recovery on the synthetic closed-loop SCM.
+# The `methods`/`seeds`/`metrics` fields below document the planned sweep; the
+# current runner executes a single MIRAGE training (methods-scan and multi-seed
+# aggregation are not yet wired into the CLI). Fields `data_dir`/`run_dir`/
+# `model_config`/`seed` are the runnable core.
+research_question: RQ1_graph_recovery
+dataset: synthetic_closed_loop_scm
+seed: 2026
+data_dir: data/processed/synthetic/default
+run_dir: artifacts/rq1_graph
+model_config: configs/model/mirage.yaml
+batch_size: 128
+num_workers: 0
+max_epochs: 50
+accelerator: auto
+devices: 1
+deterministic: true
+fast_dev_run: false
+limit_train_batches: 1.0
+limit_val_batches: 1.0
+# --- planned sweep (not executed by the current runner) ---
+data_config: configs/data/synthetic.yaml
+methods: [mirage, lagged_correlation, tigramite_pcmciplus, dynotears_causalnex, tcdf, pcmci_omega, cdans]
+seeds: [2026, 2027, 2028, 2029, 2030]
+metrics: [lag_f1, shd, auprc, sign_accuracy, regime_graph_stability]

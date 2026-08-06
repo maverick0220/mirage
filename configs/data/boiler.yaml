@@ -1,0 +1,13 @@
+source: boiler
+input_path: data/raw/boiler/sample/数据样例.csv
+encoding: gb18030
+timestamp_column: 数据时间
+sample_period_seconds: 5
+chunk_size: 20000
+nrows: null
+train_ratio: 0.60
+val_ratio: 0.20
+missing_limit: 0.30
+constant_tolerance: 1.0e-12
+output_dir: data/processed/boiler/sample
+

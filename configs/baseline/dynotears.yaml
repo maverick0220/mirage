@@ -1,0 +1,5 @@
+name: dynotears_causalnex
+adapter: mirage.baselines.causal.dynotears.DYNOTEARSAdapter
+vendor: vendor/dynotears_causalnex
+threshold_selection: validation_only
+

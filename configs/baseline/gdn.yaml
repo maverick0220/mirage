@@ -1,0 +1,5 @@
+name: gdn
+adapter: mirage.baselines.anomaly.gdn.GDNAdapter
+vendor: vendor/gdn
+threshold_selection: validation_only
+

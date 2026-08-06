@@ -1,0 +1,5 @@
+name: pcmci_omega
+adapter: mirage.baselines.causal.pcmci_omega.PCMCIomegaAdapter
+vendor: vendor/pcmci_omega
+threshold_selection: validation_only
+

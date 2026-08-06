@@ -1,0 +1,20 @@
+# Main model config, aligned with configs/data/synthetic.yaml
+# (data: n_regimes=3, max_lag=3, n_variables=12).
+# NOTE: the previously listed `lag_bank` was never read by the code; the graph
+# parameterization is dense over lags 1..max_lag, so it has been removed.
+window_size: 64
+max_lag: 3
+n_regimes: 3
+hidden_dim: 64
+regime_temperature: 0.8
+student_t_df: 5.0
+prior_weight: 0.05
+sparsity_weight: 0.001
+delta_weight: 0.001
+acyclicity_weight: 0.0
+balance_weight: 0.01
+regime_supervision_weight: 0.1
+score_topq: 0.5
+alternating: false
+learning_rate: 0.001
+weight_decay: 0.0001

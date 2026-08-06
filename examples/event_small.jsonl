@@ -1,0 +1,2 @@
+{"event_id":"demo-drift-1","start_index":5,"end_index":8,"event_type":"drift","root_cause":"actuator_feedback","regime":1,"severity":0.8,"affected_variables":["actuator_feedback","process_0"]}
+

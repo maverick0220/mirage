@@ -1,0 +1,5 @@
+name: mtad_gat
+adapter: mirage.baselines.anomaly.mtad_gat.MTADGATAdapter
+vendor: vendor/mtad_gat
+threshold_selection: validation_only
+

@@ -1,0 +1,5 @@
+name: cdans
+adapter: mirage.baselines.causal.cdans.CDANsAdapter
+vendor: vendor/cdans
+threshold_selection: validation_only
+
