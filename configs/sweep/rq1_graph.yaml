@@ -1,0 +1,20 @@
+# RQ1: causal structure recovery on the synthetic closed-loop SCM.
+# Runs MIRAGE plus causal-discovery baselines, aggregates graph metrics
+# (precision/recall/F1/SHD/AUPRC/sign accuracy) across seeds into reports/tables.
+research_question: RQ1_graph_recovery
+kind: causal
+data_dir: data/processed/synthetic/default
+artifact_root: artifacts
+report_root: reports
+max_lag: 3
+seeds: [2026, 2027, 2028, 2029, 2030]
+methods: [mirage, lagged_correlation, dynotears_causalnex, tcdf, tigramite_pcmciplus]
+model_config: configs/model/mirage.yaml
+max_epochs: 50
+num_workers: 0
+accelerator: auto
+devices: 1
+deterministic: true
+fast_dev_run: false
+limit_train_batches: 1.0
+limit_val_batches: 1.0

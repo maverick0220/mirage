@@ -8,5 +8,6 @@ train_ratio: 0.60
 val_ratio: 0.20
 anomaly_rate: 0.035
 split_embargo: 68
+train_regimes: [0, 1]
 output_dir: data/processed/synthetic/default
 

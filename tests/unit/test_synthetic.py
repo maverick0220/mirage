@@ -16,6 +16,8 @@ def test_closed_loop_scm_contract(tmp_path):
     assert "__regime" in train and "__label" in train
     graph = DynamicCausalGraph.load(paths["truth_graph"])
     assert graph.weights.shape == (2, 2, 3, 8, 8)
-    events = json.loads(paths["events"].read_text(encoding="utf-8"))
-    assert events and all(event["start_index"] >= 192 for event in events)
+    payload = json.loads(paths["events"].read_text(encoding="utf-8"))
+    assert "test_start" in payload and isinstance(payload["events"], list)
+    events = payload["events"]
+    assert events and all(event["start_index"] >= payload["test_start"] for event in events)
 

@@ -34,10 +34,33 @@ class MIRAGELightningModule(L.LightningModule):
         prior_sign: torch.Tensor | None = None,
         prior_confidence: torch.Tensor | None = None,
         context_indices: list[int] | None = None,
+        plant_mask: torch.Tensor | None = None,
+        plant_allowed_mask: torch.Tensor | None = None,
+        controller_allowed_mask: torch.Tensor | None = None,
+        plant_prior_expected: torch.Tensor | None = None,
+        plant_prior_sign: torch.Tensor | None = None,
+        plant_prior_confidence: torch.Tensor | None = None,
+        controller_prior_expected: torch.Tensor | None = None,
+        controller_prior_sign: torch.Tensor | None = None,
+        controller_prior_confidence: torch.Tensor | None = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(
-            ignore=["allowed_mask", "prior_expected", "prior_sign", "prior_confidence"]
+            ignore=[
+                "allowed_mask",
+                "prior_expected",
+                "prior_sign",
+                "prior_confidence",
+                "plant_mask",
+                "plant_allowed_mask",
+                "controller_allowed_mask",
+                "plant_prior_expected",
+                "plant_prior_sign",
+                "plant_prior_confidence",
+                "controller_prior_expected",
+                "controller_prior_sign",
+                "controller_prior_confidence",
+            ]
         )
         self.model = MIRAGECore(
             n_variables=n_variables,
@@ -47,6 +70,15 @@ class MIRAGELightningModule(L.LightningModule):
             regime_temperature=regime_temperature,
             student_t_df=student_t_df,
             allowed_mask=allowed_mask,
+            plant_mask=plant_mask,
+            plant_allowed_mask=plant_allowed_mask,
+            controller_allowed_mask=controller_allowed_mask,
+            plant_prior_expected=plant_prior_expected,
+            plant_prior_sign=plant_prior_sign,
+            plant_prior_confidence=plant_prior_confidence,
+            controller_prior_expected=controller_prior_expected,
+            controller_prior_sign=controller_prior_sign,
+            controller_prior_confidence=controller_prior_confidence,
         )
         size = n_variables
         self.register_buffer(
@@ -79,7 +111,7 @@ class MIRAGELightningModule(L.LightningModule):
 
     def _shared_step(self, batch: dict[str, torch.Tensor], stage: str) -> torch.Tensor:
         output = self(batch["values"], batch["target"])
-        regularization = self.model.graph.regularization(
+        regularization = self.model.regularization(
             self.prior_expected, self.prior_sign, self.prior_confidence
         )
         regime_loss = None
@@ -128,13 +160,17 @@ class MIRAGELightningModule(L.LightningModule):
         output = self(batch["values"], batch["target"])
         # Deliberately light payload: exporting per-sample effective graphs /
         # distribution parameters was an O(B*L*D*D) memory bomb under large configs.
-        return {
+        result = {
             "index": batch["index"],
             "score": self._device_score(output.local_nll),
             "local_score": output.local_nll,
             "regime_probability": output.regime_probabilities,
-            **({"label": batch["label"]} if "label" in batch else {}),
         }
+        if "label" in batch:
+            result["label"] = batch["label"]
+        if "regime" in batch:
+            result["regime_truth"] = batch["regime"]
+        return result
 
     def configure_optimizers(self) -> dict[str, Any]:
         optimizer = torch.optim.AdamW(

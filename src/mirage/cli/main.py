@@ -12,6 +12,7 @@ from mirage.data.sources.boiler_year import BoilerYearProcessor
 from mirage.data.sources.ess import ESSSource
 from mirage.data.sources.synthetic import ClosedLoopSCMGenerator, config_from_mapping
 from mirage.experiments.runner import evaluate_run, train_experiment
+from mirage.experiments.sweep import run_sweep
 from mirage.utils import dump_json, load_yaml
 
 
@@ -94,6 +95,10 @@ def _replay(args: argparse.Namespace) -> None:
     print(json.dumps({"samples": len(frame), "alarms": len(alarms), "output": str(output)}, ensure_ascii=False))
 
 
+def _run_sweep(args: argparse.Namespace) -> None:
+    print(json.dumps(run_sweep(args.config), ensure_ascii=False, indent=2))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mirage", description="MIRAGE industrial causal anomaly pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -130,6 +135,13 @@ def build_parser() -> argparse.ArgumentParser:
     replay.add_argument("--run-dir", required=True)
     replay.add_argument("--output", default="reports/cases/replay_alarms.json")
     replay.set_defaults(handler=_replay)
+
+    sweep = subparsers.add_parser(
+        "run-sweep",
+        help="Run an RQ experiment matrix (methods x seeds) and emit summary tables",
+    )
+    sweep.add_argument("--config", required=True)
+    sweep.set_defaults(handler=_run_sweep)
     return parser
 
 

@@ -25,6 +25,7 @@ class SyntheticSCMConfig:
     val_ratio: float = 0.2
     anomaly_rate: float = 0.035
     split_embargo: int = 0
+    train_regimes: tuple[int, ...] | None = None
 
 
 class ClosedLoopSCMGenerator(TimeSeriesSource):
@@ -140,18 +141,29 @@ class ClosedLoopSCMGenerator(TimeSeriesSource):
         variables = self._variables()
         names = [variable.name for variable in variables]
         shared, deltas = self._graphs(names)
-        d = cfg.n_variables
-        values = np.zeros((cfg.n_steps, d), dtype=np.float32)
-        regimes = np.zeros(cfg.n_steps, dtype=np.int64)
-        segment = max(1, cfg.n_steps // (cfg.n_regimes * 3))
-        regimes[:] = (np.arange(cfg.n_steps) // segment) % cfg.n_regimes
-        noise_scale = np.linspace(0.035, 0.07, d)
-        values[: cfg.max_lag + 1] = self.rng.normal(0, 0.05, (cfg.max_lag + 1, d))
-
         split = chronological_slices(
             cfg.n_steps, cfg.train_ratio, cfg.val_ratio, cfg.split_embargo
         )
         test_start = split["test"].start or 0
+        d = cfg.n_variables
+        values = np.zeros((cfg.n_steps, d), dtype=np.float32)
+        regimes = np.zeros(cfg.n_steps, dtype=np.int64)
+        segment = max(1, cfg.n_steps // (cfg.n_regimes * 3))
+        # Open-world protocol: the training/validation segment cycles only through
+        # `train_regimes`; the test segment cycles through ALL regimes, so it
+        # contains regimes never seen during training (unseen-regime holdout).
+        all_regimes = list(range(cfg.n_regimes))
+        train_regimes = list(cfg.train_regimes or all_regimes)
+        for time in range(test_start):
+            regimes[time] = train_regimes[(time // segment) % len(train_regimes)]
+        # Align the test-segment phase to the split boundary so the first regime
+        # block is full-length; otherwise a short first block can fall entirely
+        # inside the window prefix and become invisible to evaluation.
+        for time in range(test_start, cfg.n_steps):
+            regimes[time] = all_regimes[((time - test_start) // segment) % len(all_regimes)]
+        noise_scale = np.linspace(0.035, 0.07, d)
+        values[: cfg.max_lag + 1] = self.rng.normal(0, 0.05, (cfg.max_lag + 1, d))
+
         plan = self._event_plan(test_start)
         additive = np.zeros_like(values)
         stuck_events: list[tuple[int, int, int]] = []
@@ -245,7 +257,13 @@ class ClosedLoopSCMGenerator(TimeSeriesSource):
             paths[name] = path
         assert self._truth is not None
         paths["truth_graph"] = self._truth.save(output / "truth_graph.npz")
-        paths["events"] = dump_json([event.to_dict() for event in bundle.events], output / "events.json")
+        paths["events"] = dump_json(
+            {
+                "test_start": int(slices["test"].start),
+                "events": [event.to_dict() for event in bundle.events],
+            },
+            output / "events.json",
+        )
         paths["variables"] = dump_json(
             [variable.to_dict() for variable in bundle.variables], output / "variables.json"
         )

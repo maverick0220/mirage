@@ -1,0 +1,24 @@
+# RQ2: open-world anomaly detection.
+# Runs MIRAGE plus anomaly-detection baselines (statistical + neural), reports
+# point/event metrics plus open-world novelty AUROC and known/unknown false-alarm
+# rates (MIRAGE only, from regime truth stored during evaluation).
+research_question: RQ2_open_world_detection
+kind: anomaly
+data_dir: data/processed/synthetic/default
+artifact_root: artifacts
+report_root: reports
+window_size: 32
+epochs: 10
+batch_size: 128
+max_lag: 3
+seeds: [2026, 2027, 2028, 2029, 2030]
+methods: [mirage, linear_residual, robust_zscore, gdn, tranad, anomaly_transformer, omnianomaly, mtad_gat]
+model_config: configs/model/mirage.yaml
+max_epochs: 50
+num_workers: 0
+accelerator: auto
+devices: 1
+deterministic: true
+fast_dev_run: false
+limit_train_batches: 1.0
+limit_val_batches: 1.0

@@ -85,17 +85,6 @@ class PCMCIPlusAdapter(PublishedCausalAdapter):
         return self
 
 
-class DYNOTEARSAdapter(PublishedCausalAdapter):
-    name = "dynotears_causalnex"
-    module_name = "causalnex"
-    vendor_directory = "dynotears_causalnex"
-
-
-class TCDFAdapter(PublishedCausalAdapter):
-    name = "tcdf"
-    vendor_directory = "tcdf"
-
-
 class PCMCIomegaAdapter(PublishedCausalAdapter):
     name = "pcmci_omega"
     vendor_directory = "pcmci_omega"

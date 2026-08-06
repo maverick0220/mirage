@@ -14,15 +14,70 @@ from lightning.pytorch.loggers import CSVLogger
 
 from mirage.evaluation.event_metrics import event_detection_metrics, pointwise_metrics
 from mirage.evaluation.graph_metrics import graph_recovery_metrics
+from mirage.evaluation.open_world import open_world_metrics
+from mirage.evaluation.root_cause_metrics import root_cause_metrics
 from mirage.experiments.artifact_store import ArtifactStore
 from mirage.experiments.result_schema import ExperimentResult
 from mirage.priors import compile_mechanism_prior
-from mirage.schemas import DynamicCausalGraph, VariableRole, VariableSpec
+from mirage.priors.corruptor import corrupt_prior
+from mirage.priors.role_mask import (
+    controller_allowed_mask,
+    plant_allowed_mask,
+    role_graph_assignment,
+)
+from mirage.schemas import DynamicCausalGraph, MechanismPriorSpec, VariableRole, VariableSpec
 from mirage.scoring.calibration import RegimeConditionalCalibrator
 from mirage.training.callbacks import GraphSnapshotCallback
 from mirage.training.datamodule import IndustrialDataModule
 from mirage.training.lightning_module import MIRAGELightningModule
 from mirage.utils import dump_json, environment_snapshot, load_yaml, seed_everything
+
+
+def _compile_prior(
+    variables: list[VariableSpec],
+    mode: str = "soft",
+    corruption_rate: float = 0.0,
+    seed: int = 2026,
+) -> MechanismPriorSpec:
+    """Compile a mechanism prior under none / hard / soft knowledge modes.
+
+    - none: unconstrained (all edges allowed, no expectations)
+    - hard: expected edges become hard mask restrictions
+    - soft: the default prior, optionally corrupted at a given rate
+    """
+    size = len(variables)
+    base = compile_mechanism_prior(variables)
+    if mode == "none":
+        return MechanismPriorSpec(
+            np.ones((size, size), dtype=np.float32),
+            np.zeros((size, size), dtype=np.float32),
+            np.zeros((size, size), dtype=np.float32),
+            np.zeros((size, size), dtype=np.float32),
+            tuple(variable.name for variable in variables),
+        )
+    if mode == "hard":
+        allowed = np.maximum(base.expected_mask, np.eye(size))
+        return MechanismPriorSpec(
+            allowed.astype(np.float32),
+            base.expected_mask,
+            base.sign_matrix,
+            base.confidence,
+            base.variable_names,
+        )
+    if corruption_rate > 0:
+        return corrupt_prior(base, edge_flip_rate=corruption_rate, seed=seed)
+    return base
+
+
+def _masked_to_targets(spec: MechanismPriorSpec, mask: np.ndarray) -> MechanismPriorSpec:
+    """Zero the prior matrices on the target columns not owned by this graph."""
+    return MechanismPriorSpec(
+        spec.allowed_mask * mask,
+        spec.expected_mask * mask,
+        spec.sign_matrix * mask,
+        spec.confidence * mask,
+        spec.variable_names,
+    )
 
 
 def _load_variables(data_dir: Path, feature_names: list[str]) -> list[VariableSpec]:
@@ -50,6 +105,8 @@ def _prediction_frame(values: dict[str, np.ndarray], names: list[str]) -> pd.Dat
     frame = pd.DataFrame({"index": values["index"], "score": values["score"]})
     if "label" in values:
         frame["label"] = values["label"]
+    if "regime_truth" in values:
+        frame["regime_truth"] = values["regime_truth"]
     if "regime_probability" in values:
         frame["regime"] = values["regime_probability"].argmax(axis=1)
         frame["regime_confidence"] = values["regime_probability"].max(axis=1)
@@ -81,7 +138,9 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
     data_module.prepare_data()
     data_module.setup("fit")
     variables = _load_variables(data_dir, data_module.feature_names)
-    prior = compile_mechanism_prior(variables)
+    prior_mode = str(config.get("prior_mode", "soft"))
+    corruption_rate = float(config.get("prior_corruption_rate", 0.0))
+    prior = _compile_prior(variables, prior_mode, corruption_rate, seed)
     window_size = int(model_config["window_size"])
     max_lag = int(model_config.get("max_lag", 3))
     if window_size < max_lag:
@@ -94,6 +153,18 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
         for index, variable in enumerate(variables)
         if variable.role == VariableRole.CONTEXT
     ]
+    plant_mask_np, _ = role_graph_assignment(variables)
+    dual_graph = bool(config.get("dual_graph", True))
+    if dual_graph and not (plant_mask_np.any() and (~plant_mask_np).any()):
+        dual_graph = False  # nothing to split: fall back to a single graph
+    if dual_graph:
+        plant_allowed = plant_allowed_mask(variables)
+        controller_allowed = controller_allowed_mask(variables)
+        plant_prior = _masked_to_targets(prior, plant_allowed)
+        controller_prior = _masked_to_targets(prior, controller_allowed)
+    else:
+        plant_allowed = controller_allowed = None
+        plant_prior = controller_prior = prior
     module = MIRAGELightningModule(
         n_variables=data_module.n_variables,
         n_regimes=int(model_config.get("n_regimes", 3)),
@@ -116,6 +187,15 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
         prior_sign=torch.from_numpy(prior.sign_matrix),
         prior_confidence=torch.from_numpy(prior.confidence),
         context_indices=context_indices,
+        plant_mask=torch.from_numpy(plant_mask_np) if dual_graph else None,
+        plant_allowed_mask=torch.from_numpy(plant_allowed) if dual_graph else None,
+        controller_allowed_mask=torch.from_numpy(controller_allowed) if dual_graph else None,
+        plant_prior_expected=torch.from_numpy(plant_prior.expected_mask) if dual_graph else None,
+        plant_prior_sign=torch.from_numpy(plant_prior.sign_matrix) if dual_graph else None,
+        plant_prior_confidence=torch.from_numpy(plant_prior.confidence) if dual_graph else None,
+        controller_prior_expected=torch.from_numpy(controller_prior.expected_mask) if dual_graph else None,
+        controller_prior_sign=torch.from_numpy(controller_prior.sign_matrix) if dual_graph else None,
+        controller_prior_confidence=torch.from_numpy(controller_prior.confidence) if dual_graph else None,
     )
     checkpoint = ModelCheckpoint(
         dirpath=run_dir / "checkpoints",
@@ -166,18 +246,55 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
     data_module.save_state(run_dir / "data_state.json")
     # Store the learned graphs in the SAME [graph_type, regime, lag, source, target]
     # layout as the truth graph, so structural metrics are directly comparable.
-    shared = module.model.graph.shared_graph().detach().cpu().numpy()
-    regime = module.model.graph.regime_graphs().detach().cpu().numpy()
-    shared_by_regime = np.repeat(shared[None], module.model.graph.n_regimes, axis=0)
-    learned = DynamicCausalGraph(
-        np.stack([shared_by_regime, regime], axis=0),
+    def _to_truth_layout(shared: np.ndarray, regime: np.ndarray) -> np.ndarray:
+        if hasattr(module.model, "plant_graph"):
+            n_regimes = module.model.plant_graph.n_regimes
+        else:
+            n_regimes = module.model.graph.n_regimes
+        shared_by_regime = np.repeat(shared[None], n_regimes, axis=0)
+        return np.stack([shared_by_regime, regime], axis=0)
+
+    plant, controller, merged = module.model.regime_graphs()
+    shared_plant, shared_ctrl, shared_merged = module.model.shared_graphs()
+    plant = plant.detach().cpu().numpy() if plant is not None else None
+    controller = controller.detach().cpu().numpy() if controller is not None else None
+    merged = merged.detach().cpu().numpy()
+    shared_plant = shared_plant.detach().cpu().numpy() if shared_plant is not None else None
+    shared_ctrl = shared_ctrl.detach().cpu().numpy() if shared_ctrl is not None else None
+    shared_merged = shared_merged.detach().cpu().numpy()
+    learned_merged = DynamicCausalGraph(
+        _to_truth_layout(shared_merged, merged),
         tuple(data_module.feature_names),
         ("shared", "effective"),
     )
-    learned.save(run_dir / "learned_graphs.npz")
+    learned_merged.save(run_dir / "learned_graphs.npz")
+    if plant is not None:
+        names_tuple = tuple(data_module.feature_names)
+        DynamicCausalGraph(
+            _to_truth_layout(shared_plant, plant), names_tuple, ("shared", "effective")
+        ).save(run_dir / "learned_graphs_plant.npz")
+        DynamicCausalGraph(
+            _to_truth_layout(shared_ctrl, controller),
+            names_tuple,
+            ("shared", "effective"),
+        ).save(run_dir / "learned_graphs_controller.npz")
+        np.savez_compressed(
+            run_dir / "graph_assignment.npz",
+            plant_mask=np.array(plant_mask_np),
+            variable_names=np.array(data_module.feature_names),
+        )
     truth_graph = data_dir / "truth_graph.npz"
     if truth_graph.exists():
         shutil.copy2(truth_graph, run_dir / "truth_graph.npz")
+    events_source = data_dir / "events.json"
+    if events_source.exists():
+        shutil.copy2(events_source, run_dir / "events.json")
+    train_frame = pd.read_parquet(data_dir / "train.parquet")
+    train_regimes = (
+        sorted(train_frame["__regime"].unique().tolist())
+        if "__regime" in train_frame
+        else []
+    )
     metrics: dict[str, float] = {}
     if "label" in test:
         # Use the per-row regime thresholds everywhere (consistent with the
@@ -197,6 +314,10 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
         metadata={
             "features": data_module.feature_names,
             "calibration_global_threshold": calibration.global_threshold_,
+            "train_regimes": train_regimes,
+            "dual_graph": dual_graph,
+            "prior_mode": prior_mode,
+            "prior_corruption_rate": corruption_rate,
             "environment": environment_snapshot(),
         },
     )
@@ -219,6 +340,7 @@ def evaluate_run(run_dir: str | Path) -> dict[str, Any]:
         "prediction_count": int(frame["prediction"].sum()),
         "metrics": result.get("metrics", {}),
     }
+    # --- Structural (graph) metrics: overall + plant/controller split ---
     truth_path = path / "truth_graph.npz"
     learned_path = path / "learned_graphs.npz"
     if truth_path.exists() and learned_path.exists():
@@ -228,6 +350,22 @@ def evaluate_run(run_dir: str | Path) -> dict[str, Any]:
             verification["graph_metrics"] = graph_recovery_metrics(
                 truth.weights, learned.weights
             )
+            assignment = path / "graph_assignment.npz"
+            if assignment.exists():
+                plant_mask = np.load(assignment, allow_pickle=False)["plant_mask"].astype(bool)
+                plant_truth = truth.weights[..., plant_mask]
+                plant_learned = DynamicCausalGraph.load(path / "learned_graphs_plant.npz").weights
+                verification["graph_metrics_plant"] = graph_recovery_metrics(
+                    plant_truth, plant_learned[..., plant_mask]
+                )
+                controller_mask = ~plant_mask
+                controller_truth = truth.weights[..., controller_mask]
+                controller_learned = DynamicCausalGraph.load(
+                    path / "learned_graphs_controller.npz"
+                ).weights
+                verification["graph_metrics_controller"] = graph_recovery_metrics(
+                    controller_truth, controller_learned[..., controller_mask]
+                )
         else:
             verification["graph_metrics"] = {
                 "error": (
@@ -235,6 +373,49 @@ def evaluate_run(run_dir: str | Path) -> dict[str, Any]:
                     f"vs learned {learned.weights.shape}"
                 )
             }
+    # --- Open-world metrics: known vs unseen regimes ---
+    if "regime_truth" in frame.columns and result.get("metadata", {}).get("train_regimes"):
+        train_regimes = set(result["metadata"]["train_regimes"])
+        known = frame["regime_truth"].isin(train_regimes).to_numpy()
+        novelty = frame["regime_confidence"].to_numpy()
+        verification["open_world_metrics"] = open_world_metrics(known, novelty)
+        unknown_mask = ~known
+        if known.any() and unknown_mask.any():
+            known_far = frame.loc[known, "prediction"].mean()
+            unknown_far = frame.loc[unknown_mask, "prediction"].mean()
+            verification["open_world_metrics"]["false_alarm_rate_known"] = float(known_far)
+            verification["open_world_metrics"]["false_alarm_rate_unknown"] = float(unknown_far)
+    # --- Root-cause metrics from stored events ---
+    events_path = path / "events.json"
+    feature_names = result.get("metadata", {}).get("features", [])
+    if events_path.exists() and feature_names:
+        payload = json.loads(events_path.read_text(encoding="utf-8"))
+        test_start = int(payload.get("test_start", 0))
+        events = payload.get("events", [])
+        if events and any(column.startswith("local::") for column in frame.columns):
+            local_columns = [f"local::{name}" for name in feature_names]
+            local_columns = [column for column in local_columns if column in frame.columns]
+            rankings: list[list[str]] = []
+            truths: list[str] = []
+            for event in events:
+                start = event["start_index"] - test_start
+                stop = event["end_index"] - test_start
+                if start < 0 or stop < start:
+                    continue
+                window_start = int(frame["index"].min())
+                if stop < window_start or start > int(frame["index"].max()):
+                    continue
+                rows = frame.loc[
+                    (frame["index"] >= max(start, window_start)) & (frame["index"] <= stop)
+                ]
+                if rows.empty:
+                    continue
+                means = rows[local_columns].mean(axis=0)
+                ranking = [name.split("::", 1)[1] for name in means.sort_values(ascending=False).index]
+                rankings.append(ranking)
+                truths.append(event["root_cause"])
+            if rankings:
+                verification["root_cause_metrics"] = root_cause_metrics(rankings, truths)
     dump_json(verification, path / "evaluation_verification.json")
     return verification
 

@@ -15,6 +15,15 @@ class GraphSnapshotCallback(L.Callback):
         if trainer.current_epoch % self.every_n_epochs:
             return
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        graph = pl_module.model.graph.regime_graphs().detach().cpu().numpy()
-        np.savez_compressed(self.output_dir / f"epoch-{trainer.current_epoch:04d}.npz", weights=graph)
-
+        model = pl_module.model
+        if hasattr(model, "plant_graph"):
+            plant, controller, merged = model.regime_graphs()
+            np.savez_compressed(
+                self.output_dir / f"epoch-{trainer.current_epoch:04d}.npz",
+                weights=merged.detach().cpu().numpy(),
+                plant=plant.detach().cpu().numpy(),
+                controller=controller.detach().cpu().numpy(),
+            )
+        else:
+            graph = model.graph.regime_graphs().detach().cpu().numpy()
+            np.savez_compressed(self.output_dir / f"epoch-{trainer.current_epoch:04d}.npz", weights=graph)

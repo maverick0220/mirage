@@ -3,6 +3,10 @@
 #   mirage preprocess --config configs/data/boiler_full_year.yaml --output data/processed/boiler/full_year
 # then point data_dir at that output. Sampling/lag/regime sweeps are planned but
 # not wired into the runner.
+# NOTE (paper decision 2026-08-06): the full-year data has NO event ground truth.
+# Quantitative metrics (Table 2/3 boiler rows) come from CONTROLLED INJECTION on
+# expert-confirmed normal segments; real events are only qualitative case reviews.
+# Running this config without injection labels produces scores only (no event F1).
 research_question: RQ5_boiler_validation
 seed: 2026
 data_dir: data/processed/boiler/full_year
