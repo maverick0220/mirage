@@ -210,7 +210,8 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
         callbacks.append(EarlyStopping(monitor="validation/loss", mode="min", patience=10))
     # 每 epoch 打印一行 train/validation loss 摘要（nohup 后台跑也能看进度）
     callbacks.append(EpochSummaryCallback())
-    strategy = config.get("strategy")
+    # 默认 "auto"（Lightning 内置默认）；显式传 None 会被 Lightning 校验拒绝
+    strategy = config.get("strategy", "auto")
     if strategy == "ddp_gloo":
         # NCCL 在部分虚拟化 / GPU 直通环境不可用（Duplicate GPU 判定、
         # P2P 传输挂起导致 broadcast 超时）。gloo 走 TCP 通信、不依赖
