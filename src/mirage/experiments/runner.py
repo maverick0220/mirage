@@ -28,7 +28,7 @@ from mirage.priors.role_mask import (
 )
 from mirage.schemas import DynamicCausalGraph, MechanismPriorSpec, VariableRole, VariableSpec
 from mirage.scoring.calibration import RegimeConditionalCalibrator
-from mirage.training.callbacks import GraphSnapshotCallback
+from mirage.training.callbacks import EpochSummaryCallback, GraphSnapshotCallback
 from mirage.training.datamodule import IndustrialDataModule
 from mirage.training.lightning_module import MIRAGELightningModule
 from mirage.utils import dump_json, environment_snapshot, load_yaml, seed_everything
@@ -208,6 +208,8 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
     callbacks = [checkpoint, LearningRateMonitor(logging_interval="epoch"), GraphSnapshotCallback(run_dir / "graphs")]
     if int(config.get("max_epochs", 1)) > 2:
         callbacks.append(EarlyStopping(monitor="validation/loss", mode="min", patience=10))
+    # 每 epoch 打印一行 train/validation loss 摘要（nohup 后台跑也能看进度）
+    callbacks.append(EpochSummaryCallback())
     strategy = config.get("strategy")
     if strategy == "ddp_gloo":
         # NCCL 在部分虚拟化 / GPU 直通环境不可用（Duplicate GPU 判定、
@@ -228,8 +230,8 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
         gradient_clip_val=1.0,
         logger=CSVLogger(save_dir=run_dir, name="logs"),
         callbacks=callbacks,
-        enable_progress_bar=False,
-        log_every_n_steps=1,
+        enable_progress_bar=bool(config.get("enable_progress_bar", True)),
+        log_every_n_steps=int(config.get("log_every_n_steps", 50)),
     )
     trainer.fit(module, datamodule=data_module)
     # Evaluate with the BEST checkpoint (validation-loss-optimal), not the last
