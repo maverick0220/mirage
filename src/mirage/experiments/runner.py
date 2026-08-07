@@ -217,7 +217,15 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
         # P2P 传输挂起导致 broadcast 超时）。gloo 走 TCP 通信、不依赖
         # 卡间 P2P；25.7K 参数量级下通信开销可忽略。yaml 配
         # `strategy: ddp_gloo` 即启用。
-        strategy = DDPStrategy(process_group_backend="gloo")
+        strategy = DDPStrategy(process_group_backend="gloo", find_unused_parameters=True)
+    elif strategy in ("auto", None):
+        # GPU 上 Lightning 单卡/多卡默认走 DDP；MIRAGE 的图掩码路由
+        # （torch.where 按 target 拆分 plant/controller 图）在部分
+        # Lightning/torch 版本下会触发 DDP "unused parameters" 严格检查而
+        # 崩溃（如 V100 + root 容器环境）。find_unused_parameters=True 对
+        # 单进程 DDP 零开销，多卡仅一次性建桶成本。
+        if config.get("accelerator", "auto") in ("auto", "gpu", "cuda"):
+            strategy = "ddp_find_unused_parameters_true"
     trainer = L.Trainer(
         default_root_dir=run_dir,
         max_epochs=int(config.get("max_epochs", 50)),
