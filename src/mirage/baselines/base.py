@@ -22,7 +22,9 @@ class AnomalyBaseline(ABC):
     name: str
 
     @abstractmethod
-    def fit(self, train_values: np.ndarray) -> "AnomalyBaseline":
+    def fit(
+        self, train_values: np.ndarray, variable_names: list[str] | None = None
+    ) -> "AnomalyBaseline":
         raise NotImplementedError
 
     @abstractmethod

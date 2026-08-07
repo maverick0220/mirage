@@ -13,7 +13,9 @@ class LinearResidualDetector(AnomalyBaseline):
         self.coefficients_: np.ndarray | None = None
         self.scale_: np.ndarray | None = None
 
-    def fit(self, train_values: np.ndarray) -> "LinearResidualDetector":
+    def fit(
+        self, train_values: np.ndarray, variable_names: list[str] | None = None
+    ) -> "LinearResidualDetector":
         values = np.asarray(train_values, dtype=float)
         left = np.column_stack([np.ones(len(values) - 1), values[:-1]])
         right = values[1:]

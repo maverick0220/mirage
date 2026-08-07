@@ -14,7 +14,9 @@ class PublishedAnomalyAdapter(AnomalyBaseline):
     def __init__(self, vendor_root: str | Path = "vendor") -> None:
         self.vendor_root = Path(vendor_root)
 
-    def fit(self, train_values: np.ndarray) -> "PublishedAnomalyAdapter":
+    def fit(
+        self, train_values: np.ndarray, variable_names: list[str] | None = None
+    ) -> "PublishedAnomalyAdapter":
         require_external(self.name, vendor_path=self.vendor_root / self.vendor_directory)
         raise NotImplementedError(
             f"'{self.name}' is executed in its pinned upstream environment and imported through the "

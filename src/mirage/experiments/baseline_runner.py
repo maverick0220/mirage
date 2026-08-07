@@ -120,12 +120,17 @@ def run_anomaly_baseline(
     threshold = float(np.quantile(validation_scores, 0.99)) if len(validation_scores) else float("nan")
     test_scores = baseline.score(test_values)
     prediction = test_scores >= threshold
+    # 对齐语义：统计基线逐点打分（长度=len(test)），神经基线窗口预测
+    # （长度=len(test)-window_size）。统一按实际 score 长度对齐标签与 index。
+    start = len(test) - len(test_scores)
+    if start < 0:
+        raise ValueError(f"score length {len(test_scores)} exceeds test length {len(test)}")
     labels = test["__label"].to_numpy() if "__label" in test else None
-    test_labels = labels[window_size:] if labels is not None else None
+    test_labels = labels[start:] if labels is not None else None
 
     frame = pd.DataFrame(
         {
-            "index": np.arange(window_size, window_size + len(test_scores)),
+            "index": np.arange(start, start + len(test_scores)),
             "score": test_scores,
             "threshold": threshold,
             "prediction": prediction,

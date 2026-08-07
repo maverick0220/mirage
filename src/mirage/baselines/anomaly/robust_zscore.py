@@ -12,7 +12,9 @@ class RobustZScore(AnomalyBaseline):
         self.median_: np.ndarray | None = None
         self.scale_: np.ndarray | None = None
 
-    def fit(self, train_values: np.ndarray) -> "RobustZScore":
+    def fit(
+        self, train_values: np.ndarray, variable_names: list[str] | None = None
+    ) -> "RobustZScore":
         values = np.asarray(train_values, dtype=float)
         self.median_ = np.nanmedian(values, axis=0)
         mad = np.nanmedian(np.abs(values - self.median_), axis=0)
