@@ -61,6 +61,21 @@ _TABLE_METRICS = {
 }
 
 
+def _load_completed_run(run_dir: Path) -> dict[str, Any] | None:
+    """读回已完成的 run：result.json 存在、status=completed 且有 metrics 键
+    才认为可复用（用于断点续跑，跳过已完成的方法×seed）。"""
+    result_path = Path(run_dir) / "result.json"
+    if not result_path.exists():
+        return None
+    try:
+        cached = json.loads(result_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if cached.get("status") != "completed" or "metrics" not in cached:
+        return None
+    return cached
+
+
 def _run_one(
     method: str,
     kind: str,
@@ -73,6 +88,12 @@ def _run_one(
         ANOMALY_BASELINES,
         CAUSAL_BASELINES,
     )
+
+    run_dir = base_dir / "runs" / method / f"seed{seed}"
+    cached = _load_completed_run(run_dir)
+    if cached is not None:
+        print(f"[skip] {method} seed{seed} already completed, reusing result.json")
+        return cached
 
     is_causal = method in CAUSAL_BASELINES or method in ("pcmci_omega", "cdans")
     is_anomaly = (
@@ -89,9 +110,9 @@ def _run_one(
             method,
             max_lag=int(config.get("max_lag", 3)),
             seed=seed,
+            run_dir=run_dir,
         )
     if not is_mirage and (is_anomaly or kind == "anomaly"):
-        run_dir = base_dir / "runs" / method / f"seed{seed}"
         return run_anomaly_baseline(
             config["data_dir"],
             method,
@@ -107,7 +128,6 @@ def _run_one(
     #   none / hard / corr<rate>  -> prior ablations (RQ4)
     #   single                    -> single-graph backbone (dual-graph ablation)
     #   soft                      -> explicit default soft prior
-    run_dir = base_dir / "runs" / method / f"seed{seed}"
     merged = {
         **config,
         "seed": seed,

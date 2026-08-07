@@ -110,13 +110,27 @@ class OmniAnomalyPredictor(nn.Module):
         return mse + 0.1 * kl
 
 
+def _attention_heads(dim: int) -> int:
+    """选一个能整除 dim 的 head 数（优先 4/2，兜底 1）。
+    MultiheadAttention 要求 embed_dim % num_heads == 0，变量数/窗口为奇数时
+    固定 num_heads=2 会直接 AssertionError。"""
+    for heads in (4, 2, 1):
+        if dim % heads == 0:
+            return heads
+    return 1
+
+
 class MTADGATPredictor(nn.Module):
     """MTAD-GAT-style: feature attention + temporal attention -> linear head."""
 
     def __init__(self, features: int, window_size: int, hidden: int = 128):
         super().__init__()
-        self.feature_attn = nn.MultiheadAttention(features, num_heads=2, batch_first=True)
-        self.temporal_attn = nn.MultiheadAttention(window_size, num_heads=2, batch_first=True)
+        self.feature_attn = nn.MultiheadAttention(
+            features, num_heads=_attention_heads(features), batch_first=True
+        )
+        self.temporal_attn = nn.MultiheadAttention(
+            window_size, num_heads=_attention_heads(window_size), batch_first=True
+        )
         self.head = nn.Linear(features * window_size, features)
 
     def forward(self, windows: torch.Tensor) -> torch.Tensor:

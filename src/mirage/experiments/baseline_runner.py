@@ -60,6 +60,7 @@ def run_causal_baseline(
     baseline_name: str,
     max_lag: int = 3,
     seed: int = 2026,
+    run_dir: str | Path | None = None,
     **params,
 ) -> dict:
     data_dir = Path(data_dir)
@@ -73,13 +74,19 @@ def run_causal_baseline(
     truth = _truth_effective(data_dir)
     aligned = _align_to_shape(adjacency, truth.shape[0], truth.shape[1])
     metrics = graph_recovery_metrics(truth, aligned)
-    return {
+    result = {
         "baseline": baseline_name,
         "kind": "causal",
         "metrics": metrics,
         "adjacency_shape": list(aligned.shape),
         "seed": seed,
     }
+    if run_dir is not None:
+        # 落盘 result.json 供 run-sweep 断点续跑复用
+        run_dir = Path(run_dir)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        dump_json({**result, "status": "completed", "run_name": f"{baseline_name}_seed{seed}"}, run_dir / "result.json")
+    return result
 
 
 def run_anomaly_baseline(
