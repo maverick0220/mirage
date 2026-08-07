@@ -80,14 +80,17 @@ def _run_one(
         or method in ANOMALY_ALIASES
         or is_neural_anomaly(method)
     )
-    if is_causal or (kind == "causal" and not is_anomaly):
+    # MIRAGE（含 mirage_* 消融变体）永远走下方 MIRAGE 训练分支，
+    # 不能因 kind 字段是 causal/anomaly 被误判成基线方法。
+    is_mirage = method == "mirage" or method.startswith("mirage_")
+    if not is_mirage and (is_causal or (kind == "causal" and not is_anomaly)):
         return run_causal_baseline(
             config["data_dir"],
             method,
             max_lag=int(config.get("max_lag", 3)),
             seed=seed,
         )
-    if is_anomaly or kind == "anomaly":
+    if not is_mirage and (is_anomaly or kind == "anomaly"):
         run_dir = base_dir / "runs" / method / f"seed{seed}"
         return run_anomaly_baseline(
             config["data_dir"],
