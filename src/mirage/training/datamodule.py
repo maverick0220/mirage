@@ -81,6 +81,7 @@ class IndustrialDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            pin_memory=True,
             persistent_workers=self.num_workers > 0,
         )
 
@@ -90,6 +91,7 @@ class IndustrialDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            pin_memory=True,
         )
 
     def test_dataloader(self) -> DataLoader:
@@ -98,6 +100,7 @@ class IndustrialDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            pin_memory=True,
         )
 
     def state_dict(self) -> dict[str, Any]:

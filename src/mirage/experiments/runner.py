@@ -11,6 +11,7 @@ import pandas as pd
 import torch
 from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
+from lightning.pytorch.strategies import DDPStrategy
 
 from mirage.evaluation.event_metrics import event_detection_metrics, pointwise_metrics
 from mirage.evaluation.graph_metrics import graph_recovery_metrics
@@ -207,11 +208,19 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
     callbacks = [checkpoint, LearningRateMonitor(logging_interval="epoch"), GraphSnapshotCallback(run_dir / "graphs")]
     if int(config.get("max_epochs", 1)) > 2:
         callbacks.append(EarlyStopping(monitor="validation/loss", mode="min", patience=10))
+    strategy = config.get("strategy")
+    if strategy == "ddp_gloo":
+        # NCCL 在部分虚拟化 / GPU 直通环境不可用（Duplicate GPU 判定、
+        # P2P 传输挂起导致 broadcast 超时）。gloo 走 TCP 通信、不依赖
+        # 卡间 P2P；25.7K 参数量级下通信开销可忽略。yaml 配
+        # `strategy: ddp_gloo` 即启用。
+        strategy = DDPStrategy(process_group_backend="gloo")
     trainer = L.Trainer(
         default_root_dir=run_dir,
         max_epochs=int(config.get("max_epochs", 50)),
         accelerator=config.get("accelerator", "auto"),
         devices=config.get("devices", 1),
+        strategy=strategy,
         deterministic=bool(config.get("deterministic", True)),
         fast_dev_run=bool(config.get("fast_dev_run", False)),
         limit_train_batches=config.get("limit_train_batches", 1.0),

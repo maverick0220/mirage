@@ -12,6 +12,8 @@ class GraphSnapshotCallback(L.Callback):
         self.every_n_epochs = every_n_epochs
 
     def on_validation_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
+        if not trainer.is_global_zero:
+            return  # DDP 下只让 rank 0 写图快照，避免多进程并发写同一文件导致损坏
         if trainer.current_epoch % self.every_n_epochs:
             return
         self.output_dir.mkdir(parents=True, exist_ok=True)
