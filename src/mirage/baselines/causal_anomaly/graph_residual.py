@@ -52,4 +52,6 @@ class GraphResidualDetector:
             beta, *_ = np.linalg.lstsq(features, target_values, rcond=None)
             predicted = features @ beta
             residuals[max_lag:, target] = np.abs(target_values - predicted)
-        return residuals
+        # 与其它 anomaly 基线一致：返回跨变量聚合的一维分数（run_anomaly_baseline
+        # 按 [time] 一维 score 构造结果表与阈值校准）
+        return residuals.mean(axis=-1)

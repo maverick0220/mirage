@@ -32,6 +32,7 @@ class NeuralAnomalyBaseline:
         device: str | None = None,
         context_indices: list[int] | None = None,
         score_topq: float = 0.5,
+        max_lag: int | None = None,
         **model_kwargs,
     ) -> None:
         self.name = model_name
@@ -41,6 +42,9 @@ class NeuralAnomalyBaseline:
         self.learning_rate = float(learning_rate)
         self.seed = int(seed)
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        # max_lag 是 sweep 统一传入的公共参数，窗口预测模型用不到，
+        # 显式接收避免它漏进 model_kwargs 再被误传给 build_neural_predictor。
+        self.max_lag = int(max_lag) if max_lag is not None else None
         self.model_kwargs = model_kwargs
         self.context_indices = context_indices or []
         self.score_topq = float(score_topq)
@@ -50,6 +54,11 @@ class NeuralAnomalyBaseline:
     def _windows(self, values: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
         data = np.asarray(values, dtype=np.float32)
         windows = np.lib.stride_tricks.sliding_window_view(data, self.window_size, axis=0)[:-1]
+        # numpy 2.x 的 sliding_window_view 把窗口维放在最后一维 (B, D, W)，
+        # numpy 1.x 放在第二维 (B, W, D)。统一为 (B, W, D)，保证
+        # LSTM/Transformer/DLinear/GDN/MTAD-GAT 的输入布局一致。
+        if windows.shape[-1] == self.window_size:
+            windows = np.moveaxis(windows, -1, 1)
         targets = data[self.window_size :]
         return (
             torch.from_numpy(np.ascontiguousarray(windows)),
@@ -70,9 +79,7 @@ class NeuralAnomalyBaseline:
             raise ValueError("train series must be longer than window_size")
         self._n_features = values.shape[1]
         seed_everything(self.seed)
-        self._model = build_neural_predictor(
-            self.name, self._n_features, self.window_size, **self.model_kwargs
-        ).to(self.device)
+        self._model = build_neural_predictor(self.name, self._n_features, self.window_size).to(self.device)
         windows, targets = self._windows(values)
         loader = DataLoader(
             TensorDataset(windows, targets),
@@ -117,7 +124,8 @@ class NeuralAnomalyBaseline:
                     reconstruction = reconstruction[:, -1]
                     mse = ((reconstruction - batch_targets) ** 2)
                     kl = -0.5 * (1 + logvar - mean.pow(2) - logvar.exp()).sum(dim=-1)
-                    errors.append((mse + 0.1 * kl).cpu())
+                    # kl 是 (B,)；保持与其它基线一致的 (B, D) 逐变量误差布局
+                    errors.append((mse + 0.1 * kl.unsqueeze(-1)).cpu())
                 else:
                     prediction = self._model(batch_windows)
                     errors.append(((prediction - batch_targets) ** 2).cpu())
