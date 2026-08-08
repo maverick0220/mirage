@@ -156,11 +156,16 @@ class ClosedLoopSCMGenerator(TimeSeriesSource):
         train_regimes = list(cfg.train_regimes or all_regimes)
         for time in range(test_start):
             regimes[time] = train_regimes[(time // segment) % len(train_regimes)]
-        # Align the test-segment phase to the split boundary so the first regime
-        # block is full-length; otherwise a short first block can fall entirely
-        # inside the window prefix and become invisible to evaluation.
+        # 关键：test 段必须覆盖全部 regime（含训练未见工况）。全局 segment
+        # （n_steps//(K*3)）在 test 段只容纳 1~2 个块，unseen regime 进不了
+        # test，novelty AUROC 会全 NaN。test 段按自身长度分 K 块，保证每个
+        # regime（含 unseen）都出现且首块满长。
+        test_len = cfg.n_steps - test_start
+        test_segment = max(1, test_len // len(all_regimes))
         for time in range(test_start, cfg.n_steps):
-            regimes[time] = all_regimes[((time - test_start) // segment) % len(all_regimes)]
+            regimes[time] = all_regimes[
+                ((time - test_start) // test_segment) % len(all_regimes)
+            ]
         noise_scale = np.linspace(0.035, 0.07, d)
         values[: cfg.max_lag + 1] = self.rng.normal(0, 0.05, (cfg.max_lag + 1, d))
 

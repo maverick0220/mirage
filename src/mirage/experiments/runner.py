@@ -134,13 +134,18 @@ def _prior_budget(spec: MechanismPriorSpec, config: dict[str, Any], config_key: 
     return max(1, int(np.count_nonzero(expected > 0)) - int(np.trace(expected > 0)))
 
 
-def _topk_sparsify(graph: torch.Tensor, k: int) -> torch.Tensor:
+def _topk_sparsify(
+    graph: torch.Tensor, k: int, allowed: np.ndarray | None = None
+) -> torch.Tensor:
     """图导出 top-k 稀疏化：graph [K, L+1, D, D] 或 [L+1, D, D]。
 
     模型学出的图权重绝对值偏小（0.03~0.06），固定 1e-6 阈值会把近零权重
     全算成边（SHD 爆表）；但权重排序质量高（auroc ~0.93）。按权重排序保留
     lag>=1 非对角的前 k 条边，其余置 0（lag0 恒 0、对角恒 0）。k 由机制
     先验的期望边数确定（数据生成知识，不依赖测试真值）。
+
+    `allowed`：[D, D] 布尔/数值掩码——plant/controller 子图只允许在各自
+    区域内选边，否则 top-k 会选到对方区域的边，评估按 target 切片后丢失。
     """
     graph = graph.detach().cpu()
     squeeze = graph.dim() == 3
@@ -152,6 +157,14 @@ def _topk_sparsify(graph: torch.Tensor, k: int) -> torch.Tensor:
     scores = graph.abs().amax(dim=0)  # [L+1, D, D]（regime 取 max）
     lagged = scores[1:].clone()
     lagged.masked_fill_(eye.unsqueeze(0), -1.0)  # 对角不参与
+    allowed_rep = None
+    if allowed is not None:
+        allowed_rep = torch.as_tensor(
+            np.asarray(allowed, dtype=bool)
+        ).unsqueeze(0).expand(lags - 1, -1, -1)
+        lagged = torch.where(
+            allowed_rep, lagged, torch.full_like(lagged, float("-inf"))
+        )
     flat = lagged.reshape(-1)
     take = min(k, int(flat.numel()))
     if take > 0:
@@ -159,6 +172,8 @@ def _topk_sparsify(graph: torch.Tensor, k: int) -> torch.Tensor:
         selected = torch.zeros_like(flat, dtype=torch.bool)
         selected[idx] = True
         keep_any[1:] = selected.view_as(lagged)
+        if allowed_rep is not None:
+            keep_any[1:] &= allowed_rep  # allowed 区域外的选中边丢弃
     result = graph * keep_any.unsqueeze(0).float()
     return result.squeeze(0) if squeeze else result
 
@@ -356,10 +371,12 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
         # 14 会把 12 条假边塞进 controller 子图（P 崩到 0.14）。
         plant_budget = _prior_budget(plant_prior, config, "graph_budget_plant")
         controller_budget = _prior_budget(controller_prior, config, "graph_budget_controller")
-        plant = _topk_sparsify(plant, plant_budget).numpy()
-        controller = _topk_sparsify(controller, controller_budget).numpy()
-        shared_plant = _topk_sparsify(shared_plant, plant_budget).numpy()
-        shared_ctrl = _topk_sparsify(shared_ctrl, controller_budget).numpy()
+        plant_allowed_np = np.asarray(plant_allowed) > 0
+        controller_allowed_np = np.asarray(controller_allowed) > 0
+        plant = _topk_sparsify(plant, plant_budget, plant_allowed_np).numpy()
+        controller = _topk_sparsify(controller, controller_budget, controller_allowed_np).numpy()
+        shared_plant = _topk_sparsify(shared_plant, plant_budget, plant_allowed_np).numpy()
+        shared_ctrl = _topk_sparsify(shared_ctrl, controller_budget, controller_allowed_np).numpy()
     else:
         shared_plant = shared_ctrl = None
     learned_merged = DynamicCausalGraph(
