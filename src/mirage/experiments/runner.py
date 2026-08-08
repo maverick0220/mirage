@@ -125,6 +125,15 @@ def _resolve_resume_checkpoint(config: dict[str, Any], run_dir: Path) -> str | N
     return None
 
 
+def _prior_budget(spec: MechanismPriorSpec, config: dict[str, Any], config_key: str) -> int:
+    """top-k 图导出预算：优先取配置覆盖，否则用先验期望边的非对角非零数。"""
+    override = int(config.get(config_key, 0))
+    if override > 0:
+        return override
+    expected = np.asarray(spec.expected_mask)
+    return max(1, int(np.count_nonzero(expected > 0)) - int(np.trace(expected > 0)))
+
+
 def _topk_sparsify(graph: torch.Tensor, k: int) -> torch.Tensor:
     """图导出 top-k 稀疏化：graph [K, L+1, D, D] 或 [L+1, D, D]。
 
@@ -336,21 +345,21 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
     # 固定 1e-6 阈值会把全部近零权重都算成边（SHD 爆表）；但权重排序质量
     # 高（auroc ~0.93）。按权重排序保留前 k 条边（lag0 恒 0、对角恒 0），
     # k 由机制先验的期望边数确定（数据生成知识，不依赖测试真值）。
-    budget = int(config.get("graph_budget", 0))
-    if budget <= 0:
-        expected = np.asarray(prior.expected_mask)
-        budget = int(np.count_nonzero(expected > 0)) - int(np.trace(expected > 0))
-    budget = max(1, budget)
-
+    budget = _prior_budget(prior, config, "graph_budget")
     merged = _topk_sparsify(merged, budget)
     shared_merged = _topk_sparsify(shared_merged, budget)
     merged = merged.numpy()
     shared_merged = shared_merged.numpy()
     if plant is not None:
-        plant = _topk_sparsify(plant, budget).numpy()
-        controller = _topk_sparsify(controller, budget).numpy()
-        shared_plant = _topk_sparsify(shared_plant, budget).numpy()
-        shared_ctrl = _topk_sparsify(shared_ctrl, budget).numpy()
+        # plant/controller 子图按各自先验期望边数分配预算——controller 只有
+        # 2 条期望边（setpoint/process_7 → actuator_command），若用全局预算
+        # 14 会把 12 条假边塞进 controller 子图（P 崩到 0.14）。
+        plant_budget = _prior_budget(plant_prior, config, "graph_budget_plant")
+        controller_budget = _prior_budget(controller_prior, config, "graph_budget_controller")
+        plant = _topk_sparsify(plant, plant_budget).numpy()
+        controller = _topk_sparsify(controller, controller_budget).numpy()
+        shared_plant = _topk_sparsify(shared_plant, plant_budget).numpy()
+        shared_ctrl = _topk_sparsify(shared_ctrl, controller_budget).numpy()
     else:
         shared_plant = shared_ctrl = None
     learned_merged = DynamicCausalGraph(
