@@ -26,6 +26,7 @@ class SyntheticSCMConfig:
     anomaly_rate: float = 0.035
     split_embargo: int = 0
     train_regimes: tuple[int, ...] | None = None
+    regime_delta_scale: float = 0.2
 
 
 class ClosedLoopSCMGenerator(TimeSeriesSource):
@@ -72,8 +73,12 @@ class ClosedLoopSCMGenerator(TimeSeriesSource):
         if self.config.max_lag >= 2:
             shared[2, 3, min(5, d - 1)] = 0.16
         deltas = np.zeros((self.config.n_regimes, lags, d, d), dtype=np.float32)
+        # regime 间系数差异幅度：0.08 太小——unseen regime（训练未见工况）与
+        # 已知工况分布高度重叠，模型无法区分，novelty AUROC 会停留在 0.5
+        # （掷硬币）。加大到 0.2 让工况差异可检测，open-world 留出才有意义。
+        delta_scale = float(getattr(self.config, "regime_delta_scale", 0.2))
         for regime in range(self.config.n_regimes):
-            scale = (regime - (self.config.n_regimes - 1) / 2) * 0.08
+            scale = (regime - (self.config.n_regimes - 1) / 2) * delta_scale
             deltas[regime, 1, 2, 3] = scale
             deltas[regime, 1, 3, 4] = -scale / 2
             deltas[regime, 1, 0, 4] = scale / 3

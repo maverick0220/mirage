@@ -237,10 +237,14 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
     if dual_graph and not (plant_mask_np.any() and (~plant_mask_np).any()):
         dual_graph = False  # nothing to split: fall back to a single graph
     if dual_graph:
-        plant_allowed = plant_allowed_mask(variables)
-        controller_allowed = controller_allowed_mask(variables)
-        plant_prior = _masked_to_targets(prior, plant_allowed)
-        controller_prior = _masked_to_targets(prior, controller_allowed)
+        role_plant_allowed = plant_allowed_mask(variables)
+        role_controller_allowed = controller_allowed_mask(variables)
+        plant_prior = _masked_to_targets(prior, role_plant_allowed)
+        controller_prior = _masked_to_targets(prior, role_controller_allowed)
+        # 模型图 allowed 必须用先验限定后的掩码（hard 模式 = 期望边 ∩ 角色），
+        # 而不是纯角色掩码——否则 hard 消融不生效（hard 与 soft 训练完全相同）。
+        plant_allowed = plant_prior.allowed_mask
+        controller_allowed = controller_prior.allowed_mask
     else:
         plant_allowed = controller_allowed = None
         plant_prior = controller_prior = prior
