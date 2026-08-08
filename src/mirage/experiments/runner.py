@@ -437,33 +437,29 @@ def evaluate_run(run_dir: str | Path) -> dict[str, Any]:
     if truth_path.exists() and learned_path.exists():
         truth = DynamicCausalGraph.load(truth_path)
         learned = DynamicCausalGraph.load(learned_path)
-        if truth.weights.shape == learned.weights.shape:
-            verification["graph_metrics"] = graph_recovery_metrics(
-                truth.weights, learned.weights
+        # 统一评估口径：与基线（run_causal_baseline 的 _truth_effective）一致，
+        # 用 effective 层（[1]）对 regime 取 max -> [L+1, D, D]；自环由
+        # graph_recovery_metrics 默认排除。5D 全张量直接比较会因 shared/
+        # effective 双计数 + 真值自环污染导致 SHD 虚高且与基线不可比。
+        truth_eff = np.abs(truth.weights[1]).max(axis=0)
+        learned_eff = np.abs(learned.weights[1]).max(axis=0)
+        verification["graph_metrics"] = graph_recovery_metrics(truth_eff, learned_eff)
+        assignment = path / "graph_assignment.npz"
+        if assignment.exists():
+            plant_mask = np.load(assignment, allow_pickle=False)["plant_mask"].astype(bool)
+            plant_truth = truth_eff[..., plant_mask]
+            plant_learned = DynamicCausalGraph.load(path / "learned_graphs_plant.npz").weights
+            plant_eff = np.abs(plant_learned[1]).max(axis=0)[..., plant_mask]
+            verification["graph_metrics_plant"] = graph_recovery_metrics(plant_truth, plant_eff)
+            controller_mask = ~plant_mask
+            controller_truth = truth_eff[..., controller_mask]
+            controller_learned = DynamicCausalGraph.load(
+                path / "learned_graphs_controller.npz"
+            ).weights
+            controller_eff = np.abs(controller_learned[1]).max(axis=0)[..., controller_mask]
+            verification["graph_metrics_controller"] = graph_recovery_metrics(
+                controller_truth, controller_eff
             )
-            assignment = path / "graph_assignment.npz"
-            if assignment.exists():
-                plant_mask = np.load(assignment, allow_pickle=False)["plant_mask"].astype(bool)
-                plant_truth = truth.weights[..., plant_mask]
-                plant_learned = DynamicCausalGraph.load(path / "learned_graphs_plant.npz").weights
-                verification["graph_metrics_plant"] = graph_recovery_metrics(
-                    plant_truth, plant_learned[..., plant_mask]
-                )
-                controller_mask = ~plant_mask
-                controller_truth = truth.weights[..., controller_mask]
-                controller_learned = DynamicCausalGraph.load(
-                    path / "learned_graphs_controller.npz"
-                ).weights
-                verification["graph_metrics_controller"] = graph_recovery_metrics(
-                    controller_truth, controller_learned[..., controller_mask]
-                )
-        else:
-            verification["graph_metrics"] = {
-                "error": (
-                    f"shape mismatch: truth {truth.weights.shape} "
-                    f"vs learned {learned.weights.shape}"
-                )
-            }
     # --- Open-world metrics: known vs unseen regimes ---
     if "regime_truth" in frame.columns and result.get("metadata", {}).get("train_regimes"):
         train_regimes = set(result["metadata"]["train_regimes"])
