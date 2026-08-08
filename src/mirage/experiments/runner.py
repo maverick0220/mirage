@@ -494,7 +494,10 @@ def evaluate_run(run_dir: str | Path) -> dict[str, Any]:
     if "regime_truth" in frame.columns and result.get("metadata", {}).get("train_regimes"):
         train_regimes = set(result["metadata"]["train_regimes"])
         known = frame["regime_truth"].isin(train_regimes).to_numpy()
-        novelty = frame["regime_confidence"].to_numpy()
+        # novelty 分数用机制偏差（异常分数）：unseen 工况下机制预测偏差大 →
+        # score 高。regime_confidence 无效（regime encoder 对 unseen 也高置信
+        # 分类，实测 novelty AUROC ≈ 0.5）。
+        novelty = frame["score"].to_numpy()
         verification["open_world_metrics"] = open_world_metrics(known, novelty)
         unknown_mask = ~known
         if known.any() and unknown_mask.any():
