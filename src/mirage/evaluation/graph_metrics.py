@@ -48,12 +48,19 @@ def graph_recovery_metrics(
         raise ValueError(f"Graph shapes differ: {true_array.shape} vs {predicted_array.shape}")
     true_bin = np.abs(true_array) > 1e-8
     scores = np.abs(predicted_array)
-    if not include_diagonal and true_array.ndim >= 2:
+    # 仅对正方形输入（[..., D, D]）排除对角——自环由机制网络 own_state 通道
+    # 建模，真值图的自回归系数不应计入 SHD；plant/controller 子图是
+    # [L+1, D, D'] 非正方形（只按 target 切片），对角无定义，保持原行为。
+    if (
+        not include_diagonal
+        and true_array.ndim >= 2
+        and true_array.shape[-1] == true_array.shape[-2]
+    ):
         d = true_array.shape[-1]
         diag_mask = np.broadcast_to(np.eye(d, dtype=bool), true_array.shape)
         true_bin = true_bin & ~diag_mask
         scores = scores.copy()
-        scores[diag_mask] = 0.0  # 对角不参与排序/阈值（注意不能设负数：|score| 会把它算成边）
+        scores[diag_mask] = 0.0  # 对角不参与排序/阈值（不能设负数：|score| 会把它算成边）
     metrics = _binary_metrics(true_bin, scores, threshold)
     true_sign = np.sign(true_array)
     predicted_sign = np.sign(predicted_array)
