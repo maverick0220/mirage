@@ -20,7 +20,10 @@ class LaggedCorrelation(CausalDiscoveryBaseline):
         for lag in range(1, self.max_lag + 1):
             left = values[:-lag]
             right = values[lag:]
-            correlation = np.corrcoef(left.T, right.T)[:d, d:]
+            # 常数列（stddev=0）会让 corrcoef 产生 NaN 并刷 divide 警告；
+            # 抑制警告，NaN 由下方 nan_to_num 统一转 0（无相关）。
+            with np.errstate(invalid="ignore", divide="ignore"):
+                correlation = np.corrcoef(left.T, right.T)[:d, d:]
             correlation = np.nan_to_num(correlation)
             correlation[np.abs(correlation) < self.threshold] = 0
             result[lag] = correlation

@@ -62,9 +62,12 @@ class DualGraphParameterization(nn.Module):
     ) -> dict[str, torch.Tensor]:
         shared = self.shared_graph()
         regime = self.regime_graphs()
+        # 稀疏/δ 正则必须用 sum()：mean() 会把梯度除以全图元素数
+        # （D*D*(L+1)，12 变量 4 lag 即 576 倍），导致 L1 梯度 ~1e-5 完全
+        # 压不动权重，图为学成稠密（SHD 爆表）。sum() 下梯度 = λ/参数。
         losses = {
-            "sparsity": shared.abs().mean(),
-            "delta": (regime - shared.unsqueeze(0)).abs().mean(),
+            "sparsity": shared.abs().sum(),
+            "delta": (regime - shared.unsqueeze(0)).abs().sum(),
         }
         # Priors describe lagged edges (lag >= 1); instantaneous slice is not
         # subject to the expected-edge prior.

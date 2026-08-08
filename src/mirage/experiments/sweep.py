@@ -1,8 +1,16 @@
 """Sweep runner: executes RQ experiment matrices (methods x seeds) and
-aggregates results with paired statistics into paper-ready tables."""
+aggregates results with paired statistics into paper-ready tables.
+
+Incremental-seed workflow: each (method, seed) run directory stores a
+`sweep_fingerprint.json` hash of every result-affecting knob. Re-running a sweep
+with the SAME config skips already-completed runs (only missing seeds execute);
+changing any knob (hyper-parameters, data, model config file, prior mode...)
+produces a new fingerprint so stale results are re-run instead of reused.
+"""
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -12,7 +20,7 @@ import pandas as pd
 
 from mirage.evaluation.statistics import paired_bootstrap_interval, wilcoxon_paired
 from mirage.experiments.baseline_runner import run_anomaly_baseline, run_causal_baseline
-from mirage.experiments.registry import is_neural_anomaly
+from mirage.experiments.registry import CAUSAL_BASELINES, is_neural_anomaly
 from mirage.experiments.runner import evaluate_run, train_experiment
 from mirage.utils import dump_json, load_yaml
 
@@ -61,21 +69,6 @@ _TABLE_METRICS = {
 }
 
 
-def _load_completed_run(run_dir: Path) -> dict[str, Any] | None:
-    """读回已完成的 run：result.json 存在、status=completed 且有 metrics 键
-    才认为可复用（用于断点续跑，跳过已完成的方法×seed）。"""
-    result_path = Path(run_dir) / "result.json"
-    if not result_path.exists():
-        return None
-    try:
-        cached = json.loads(result_path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    if cached.get("status") != "completed" or "metrics" not in cached:
-        return None
-    return cached
-
-
 def _run_one(
     method: str,
     kind: str,
@@ -90,11 +83,6 @@ def _run_one(
     )
 
     run_dir = base_dir / "runs" / method / f"seed{seed}"
-    cached = _load_completed_run(run_dir)
-    if cached is not None:
-        print(f"[skip] {method} seed{seed} already completed, reusing result.json")
-        return cached
-
     is_causal = method in CAUSAL_BASELINES or method in ("pcmci_omega", "cdans")
     is_anomaly = (
         method in ANOMALY_BASELINES
@@ -110,7 +98,6 @@ def _run_one(
             method,
             max_lag=int(config.get("max_lag", 3)),
             seed=seed,
-            run_dir=run_dir,
         )
     if not is_mirage and (is_anomaly or kind == "anomaly"):
         return run_anomaly_baseline(
@@ -130,6 +117,7 @@ def _run_one(
     #   soft                      -> explicit default soft prior
     merged = {
         **config,
+        "name": method,
         "seed": seed,
         "run_dir": str(run_dir),
         "prior_mode": config.get("prior_mode", "soft"),
@@ -186,6 +174,42 @@ def _run_one(
     return {"metrics": metrics}
 
 
+def _config_fingerprint(config: dict[str, Any], method: str, seed: int) -> str:
+    """Hash every result-affecting knob: config, model_config file content, method, seed."""
+    payload = {
+        key: value
+        for key, value in config.items()
+        if key not in ("seeds", "methods")
+    }
+    model_path = config.get("model_config")
+    if model_path and Path(str(model_path)).exists():
+        try:
+            payload["model_config_content"] = Path(str(model_path)).read_text(encoding="utf-8")
+        except OSError:
+            pass
+    payload["method"] = method
+    payload["seed"] = seed
+    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _load_completed(run_dir: Path, fingerprint: str) -> dict[str, Any] | None:
+    marker = run_dir / "sweep_fingerprint.json"
+    result_path = run_dir / "result.json"
+    if marker.exists() and result_path.exists():
+        try:
+            if marker.read_text(encoding="utf-8").strip() == fingerprint:
+                return json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+    return None
+
+
+def _write_fingerprint(run_dir: Path, fingerprint: str) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "sweep_fingerprint.json").write_text(fingerprint, encoding="utf-8")
+
+
 def run_sweep(config_path: str | Path) -> dict[str, Any]:
     config_path = Path(config_path)
     config = load_yaml(config_path)
@@ -199,16 +223,34 @@ def run_sweep(config_path: str | Path) -> dict[str, Any]:
 
     rows: list[dict[str, Any]] = []
     evaluations: dict[str, dict[str, Any]] = {}
+    # causal 表里 MIRAGE 的图指标带 graph_ 前缀（graph_shd 等），基线则是裸键
+    # （shd）。causal 表统一优先取 graph_ 前缀，保证 MIRAGE 与基线同口径比较。
+    prefer_graph_prefix = kind == "causal"
     for method in methods:
         for seed in seeds:
-            result = _run_one(method, kind, config, seed, base_dir)
+            fingerprint = _config_fingerprint(config, method, seed)
+            is_causal_baseline = method in CAUSAL_BASELINES or method in ("pcmci_omega", "cdans")
+            run_dir = base_dir / "runs" / method / f"seed{seed}"
+            existing = None if is_causal_baseline else _load_completed(run_dir, fingerprint)
+            if existing is not None:
+                result = existing
+                print(f"[skip] {method} seed={seed}: completed with identical config")
+            else:
+                result = _run_one(method, kind, config, seed, base_dir)
+                if not is_causal_baseline:
+                    _write_fingerprint(run_dir, fingerprint)
             metrics = result.get("metrics", {}) if isinstance(result, dict) else result.metrics
             metrics = dict(metrics)
-            # For causal baselines the graph metrics live under `metrics` already.
+
+            def metric_value(key: str) -> Any:
+                if prefer_graph_prefix:
+                    return metrics.get(f"graph_{key}", metrics.get(key))
+                return metrics.get(key, metrics.get(f"graph_{key}"))
+
             row = {
                 "method": method,
                 "seed": seed,
-                **{key: metrics.get(key) for key in _TABLE_METRICS.get(kind, [])},
+                **{key: metric_value(key) for key in _TABLE_METRICS.get(kind, [])},
             }
             rows.append(row)
             evaluations.setdefault(method, {})[seed] = metrics

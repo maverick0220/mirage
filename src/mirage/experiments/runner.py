@@ -102,6 +102,24 @@ def _combine_predictions(outputs: list[dict[str, torch.Tensor]]) -> dict[str, np
     }
 
 
+def _resolve_resume_checkpoint(config: dict[str, Any], run_dir: Path) -> str | None:
+    """Resume support: config `resume: true` resumes from run_dir/checkpoints/last.ckpt;
+    config `resume_checkpoint: <path>` resumes from an explicit checkpoint."""
+    if not config.get("resume", False):
+        return None
+    explicit = config.get("resume_checkpoint")
+    if explicit:
+        path = Path(str(explicit))
+        if not path.exists():
+            raise FileNotFoundError(f"resume_checkpoint not found: {path}")
+        return str(path)
+    last = run_dir / "checkpoints" / "last.ckpt"
+    if last.exists():
+        return str(last)
+    print("resume requested but no last.ckpt exists; starting training from scratch")
+    return None
+
+
 def _prediction_frame(values: dict[str, np.ndarray], names: list[str]) -> pd.DataFrame:
     frame = pd.DataFrame({"index": values["index"], "score": values["score"]})
     if "label" in values:
@@ -242,7 +260,8 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
         enable_progress_bar=bool(config.get("enable_progress_bar", True)),
         log_every_n_steps=int(config.get("log_every_n_steps", 50)),
     )
-    trainer.fit(module, datamodule=data_module)
+    resume_ckpt = _resolve_resume_checkpoint(config, run_dir)
+    trainer.fit(module, datamodule=data_module, ckpt_path=resume_ckpt)
     # Evaluate with the BEST checkpoint (validation-loss-optimal), not the last
     # epoch's weights; otherwise the ModelCheckpoint callback is decorative.
     if checkpoint.best_model_path and Path(checkpoint.best_model_path).exists():
