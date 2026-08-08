@@ -502,13 +502,23 @@ def evaluate_run(run_dir: str | Path) -> dict[str, Any]:
             novelty = frame[local_cols].max(axis=1).to_numpy()
         else:
             novelty = frame["score"].to_numpy()
-        verification["open_world_metrics"] = open_world_metrics(known, novelty)
-        unknown_mask = ~known
-        if known.any() and unknown_mask.any():
-            known_far = frame.loc[known, "prediction"].mean()
-            unknown_far = frame.loc[unknown_mask, "prediction"].mean()
-            verification["open_world_metrics"]["false_alarm_rate_known"] = float(known_far)
-            verification["open_world_metrics"]["false_alarm_rate_unknown"] = float(unknown_far)
+        # novelty 评估排除故障注入样本（label=1）：故障本身也是机制突变，
+        # 会同时污染 known/unseen 两段的局部偏差，使 AUROC 无法区分工况变化。
+        clean = np.ones(len(frame), dtype=bool)
+        if "label" in frame.columns:
+            clean = frame["label"].to_numpy() == 0
+        verification["open_world_metrics"] = open_world_metrics(known[clean], novelty[clean])
+        if clean.any() and (~clean).any():
+            known_clean = known[clean]
+            unknown_clean = ~known_clean
+            if known_clean.any() and unknown_clean.any():
+                prediction_clean = frame["prediction"].to_numpy()[clean]
+                verification["open_world_metrics"]["false_alarm_rate_known"] = float(
+                    prediction_clean[known_clean].mean()
+                )
+                verification["open_world_metrics"]["false_alarm_rate_unknown"] = float(
+                    prediction_clean[unknown_clean].mean()
+                )
     # --- Root-cause metrics from stored events ---
     events_path = path / "events.json"
     feature_names = result.get("metadata", {}).get("features", [])
