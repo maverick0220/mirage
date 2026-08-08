@@ -494,10 +494,14 @@ def evaluate_run(run_dir: str | Path) -> dict[str, Any]:
     if "regime_truth" in frame.columns and result.get("metadata", {}).get("train_regimes"):
         train_regimes = set(result["metadata"]["train_regimes"])
         known = frame["regime_truth"].isin(train_regimes).to_numpy()
-        # novelty 分数用机制偏差（异常分数）：unseen 工况下机制预测偏差大 →
-        # score 高。regime_confidence 无效（regime encoder 对 unseen 也高置信
-        # 分类，实测 novelty AUROC ≈ 0.5）。
-        novelty = frame["score"].to_numpy()
+        # novelty 分数用局部机制偏差（local:: 逐变量分数的 max）：unseen 工况
+        # 只影响少数因果边，全局 top-q 平均会稀释信号；取受影响变量的最大
+        # 偏差最敏感。regime_confidence 与全局 score 均实测无效（≈0.5）。
+        local_cols = [column for column in frame.columns if column.startswith("local::")]
+        if local_cols:
+            novelty = frame[local_cols].max(axis=1).to_numpy()
+        else:
+            novelty = frame["score"].to_numpy()
         verification["open_world_metrics"] = open_world_metrics(known, novelty)
         unknown_mask = ~known
         if known.any() and unknown_mask.any():
