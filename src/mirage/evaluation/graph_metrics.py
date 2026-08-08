@@ -29,8 +29,13 @@ def _binary_metrics(truth: np.ndarray, score: np.ndarray, threshold: float) -> d
 
 
 def graph_recovery_metrics(
-    truth: np.ndarray, prediction: np.ndarray, threshold: float = 0.1
+    truth: np.ndarray, prediction: np.ndarray, threshold: float = 1e-6
 ) -> dict[str, float]:
+    """图恢复指标。默认阈值 1e-6：稀疏化由上游负责（MIRAGE 图导出已做
+    top-k，基线输出 0/1 二值 adjacency），这里只做"非零即边"判定。
+    不要把默认阈值设成 0.1——MIRAGE 学习图权重普遍在 0.03~0.09，
+    0.1 阈值会把 top-k 已选中的边全部误杀（SHD 虚高）。
+    """
     true_array = np.asarray(truth)
     predicted_array = np.asarray(prediction)
     if true_array.shape != predicted_array.shape:
