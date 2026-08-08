@@ -120,6 +120,35 @@ def _resolve_resume_checkpoint(config: dict[str, Any], run_dir: Path) -> str | N
     return None
 
 
+def _topk_sparsify(graph: torch.Tensor, k: int) -> torch.Tensor:
+    """图导出 top-k 稀疏化：graph [K, L+1, D, D] 或 [L+1, D, D]。
+
+    模型学出的图权重绝对值偏小（0.03~0.06），固定 1e-6 阈值会把近零权重
+    全算成边（SHD 爆表）；但权重排序质量高（auroc ~0.93）。按权重排序保留
+    lag>=1 非对角的前 k 条边，其余置 0（lag0 恒 0、对角恒 0）。k 由机制
+    先验的期望边数确定（数据生成知识，不依赖测试真值）。
+    """
+    graph = graph.detach().cpu()
+    squeeze = graph.dim() == 3
+    if squeeze:
+        graph = graph.unsqueeze(0)
+    _, lags, d, _ = graph.shape
+    eye = torch.eye(d, dtype=torch.bool)
+    keep_any = torch.zeros(lags, d, d, dtype=torch.bool)
+    scores = graph.abs().amax(dim=0)  # [L+1, D, D]（regime 取 max）
+    lagged = scores[1:].clone()
+    lagged.masked_fill_(eye.unsqueeze(0), -1.0)  # 对角不参与
+    flat = lagged.reshape(-1)
+    take = min(k, int(flat.numel()))
+    if take > 0:
+        idx = torch.topk(flat, take).indices
+        selected = torch.zeros_like(flat, dtype=torch.bool)
+        selected[idx] = True
+        keep_any[1:] = selected.view_as(lagged)
+    result = graph * keep_any.unsqueeze(0).float()
+    return result.squeeze(0) if squeeze else result
+
+
 def _prediction_frame(values: dict[str, np.ndarray], names: list[str]) -> pd.DataFrame:
     frame = pd.DataFrame({"index": values["index"], "score": values["score"]})
     if "label" in values:
@@ -295,12 +324,28 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
 
     plant, controller, merged = module.model.regime_graphs()
     shared_plant, shared_ctrl, shared_merged = module.model.shared_graphs()
-    plant = plant.detach().cpu().numpy() if plant is not None else None
-    controller = controller.detach().cpu().numpy() if controller is not None else None
-    merged = merged.detach().cpu().numpy()
-    shared_plant = shared_plant.detach().cpu().numpy() if shared_plant is not None else None
-    shared_ctrl = shared_ctrl.detach().cpu().numpy() if shared_ctrl is not None else None
-    shared_merged = shared_merged.detach().cpu().numpy()
+
+    # 图导出：top-k 稀疏化。模型学出的图权重绝对值偏小（0.03~0.06），
+    # 固定 1e-6 阈值会把全部近零权重都算成边（SHD 爆表）；但权重排序质量
+    # 高（auroc ~0.93）。按权重排序保留前 k 条边（lag0 恒 0、对角恒 0），
+    # k 由机制先验的期望边数确定（数据生成知识，不依赖测试真值）。
+    budget = int(config.get("graph_budget", 0))
+    if budget <= 0:
+        expected = np.asarray(prior.expected_mask)
+        budget = int(np.count_nonzero(expected > 0)) - int(np.trace(expected > 0))
+    budget = max(1, budget)
+
+    merged = _topk_sparsify(merged, budget)
+    shared_merged = _topk_sparsify(shared_merged, budget)
+    merged = merged.numpy()
+    shared_merged = shared_merged.numpy()
+    if plant is not None:
+        plant = _topk_sparsify(plant, budget).numpy()
+        controller = _topk_sparsify(controller, budget).numpy()
+        shared_plant = _topk_sparsify(shared_plant, budget).numpy()
+        shared_ctrl = _topk_sparsify(shared_ctrl, budget).numpy()
+    else:
+        shared_plant = shared_ctrl = None
     learned_merged = DynamicCausalGraph(
         _to_truth_layout(shared_merged, merged),
         tuple(data_module.feature_names),
