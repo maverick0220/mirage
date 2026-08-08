@@ -10,4 +10,23 @@ anomaly_rate: 0.035
 split_embargo: 68
 train_regimes: [0, 1]
 output_dir: data/processed/synthetic/default
+# 机制先验期望边（source, target, sign, weight）——与 src/mirage/data/sources/
+# synthetic.py 的 _graphs() 生成系数一一对应（数据生成知识，非测试真值）。
+# 驱动：①prior 正则（soft/hard/corr 消融的前提）；②top-k 图导出的默认预算。
+expected_edges:
+  - [load_context, setpoint, 1, 1.0]
+  - [process_7, actuator_command, -1, 1.0]
+  - [setpoint, actuator_command, 1, 1.0]
+  - [actuator_command, actuator_feedback, 1, 1.0]
+  - [actuator_feedback, process_0, 1, 1.0]
+  - [load_context, process_0, 1, 1.0]
+  - [process_0, process_1, 1, 1.0]
+  - [process_1, process_2, 1, 1.0]
+  - [process_2, process_3, 1, 1.0]
+  - [process_3, process_4, 1, 1.0]
+  - [process_4, process_5, 1, 1.0]
+  - [process_5, process_6, 1, 1.0]
+  - [process_6, process_7, 1, 1.0]
+  - [actuator_feedback, process_1, 1, 1.0]
+
 

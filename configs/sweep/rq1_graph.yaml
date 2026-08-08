@@ -9,6 +9,21 @@ report_root: reports
 max_lag: 3
 seeds: [2026, 2027, 2028, 2029, 2030]
 methods: [mirage, lagged_correlation, dynotears_causalnex, tcdf, tigramite_pcmciplus]
+expected_edges:
+  - [load_context, setpoint, 1, 1.0]
+  - [process_7, actuator_command, -1, 1.0]
+  - [setpoint, actuator_command, 1, 1.0]
+  - [actuator_command, actuator_feedback, 1, 1.0]
+  - [actuator_feedback, process_0, 1, 1.0]
+  - [load_context, process_0, 1, 1.0]
+  - [process_0, process_1, 1, 1.0]
+  - [process_1, process_2, 1, 1.0]
+  - [process_2, process_3, 1, 1.0]
+  - [process_3, process_4, 1, 1.0]
+  - [process_4, process_5, 1, 1.0]
+  - [process_5, process_6, 1, 1.0]
+  - [process_6, process_7, 1, 1.0]
+  - [actuator_feedback, process_1, 1, 1.0]
 model_config: configs/model/mirage.yaml
 max_epochs: 50
 num_workers: 0

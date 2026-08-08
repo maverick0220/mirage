@@ -39,15 +39,20 @@ def _compile_prior(
     mode: str = "soft",
     corruption_rate: float = 0.0,
     seed: int = 2026,
+    expected_edges: list | None = None,
 ) -> MechanismPriorSpec:
     """Compile a mechanism prior under none / hard / soft knowledge modes.
 
     - none: unconstrained (all edges allowed, no expectations)
     - hard: expected edges become hard mask restrictions
     - soft: the default prior, optionally corrupted at a given rate
+
+    `expected_edges` 是 (source, target, sign, weight) 列表，来自数据生成知识
+    （合成 SCM 的机制边）；缺省为空时 expected_mask 全 0，prior 正则与
+    top-k 图预算（graph_budget 默认值）都会失效。
     """
     size = len(variables)
-    base = compile_mechanism_prior(variables)
+    base = compile_mechanism_prior(variables, expected_edges)
     if mode == "none":
         return MechanismPriorSpec(
             np.ones((size, size), dtype=np.float32),
@@ -188,7 +193,9 @@ def train_experiment(config_path: str | Path) -> ExperimentResult:
     variables = _load_variables(data_dir, data_module.feature_names)
     prior_mode = str(config.get("prior_mode", "soft"))
     corruption_rate = float(config.get("prior_corruption_rate", 0.0))
-    prior = _compile_prior(variables, prior_mode, corruption_rate, seed)
+    prior = _compile_prior(
+        variables, prior_mode, corruption_rate, seed, config.get("expected_edges")
+    )
     window_size = int(model_config["window_size"])
     max_lag = int(model_config.get("max_lag", 3))
     if window_size < max_lag:
