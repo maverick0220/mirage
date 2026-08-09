@@ -29,7 +29,7 @@ expected_edges:
   - [process_4, process_5, 1, 1.0]
   - [process_5, process_6, 1, 1.0]
   - [process_6, process_7, 1, 1.0]
-  - [actuator_feedback, process_1, 1, 1.0]
+  - [actuator_feedback, process_1, 2, 1.0]
 model_config: configs/model/mirage.yaml
 max_epochs: 50
 num_workers: 0
