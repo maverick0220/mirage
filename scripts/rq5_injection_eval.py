@@ -46,6 +46,8 @@ from mirage.evaluation.root_cause_metrics import root_cause_metrics
 from mirage.experiments.runner import _compile_prior, _load_variables, _masked_to_targets
 from mirage.priors.role_mask import controller_allowed_mask, plant_allowed_mask, role_graph_assignment
 from mirage.training.lightning_module import MIRAGELightningModule
+from mirage.scoring.root_cause import rank_root_causes
+# from mirage.schemas.graph import DynamicCausalGraph
 
 # Variables that must never be injection targets: the fuel-flow cumulative meter
 # (absurd scale, 16 orders above the rest) and the all-zero feed-water flow.
@@ -398,6 +400,13 @@ def main() -> int:
             )
             baseline.fit(train_values, feature_names)
             raw = np.asarray(baseline.score(injected), dtype=np.float32).reshape(-1)
+            np.save(output_dir / f"baseline_{name}_scores.npy", raw)
+            print(
+                f"[baseline] {name} raw score: n={len(raw)} min={raw.min():.3f} "
+                f"max={raw.max():.3f} mean={raw.mean():.3f} std={raw.std():.3f} "
+                f"nan={int(np.isnan(raw).sum())}",
+                flush=True,
+            )
             if len(raw) > n:
                 print(f"neural baseline {name}: score length {len(raw)} > base rows {n}", file=sys.stderr)
                 return 1
