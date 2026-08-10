@@ -21,6 +21,7 @@ from mirage.experiments.artifact_store import ArtifactStore
 from mirage.experiments.result_schema import ExperimentResult
 from mirage.priors import compile_mechanism_prior
 from mirage.priors.corruptor import corrupt_prior
+from mirage.scoring.root_cause import rank_root_causes
 from mirage.priors.role_mask import (
     controller_allowed_mask,
     plant_allowed_mask,
