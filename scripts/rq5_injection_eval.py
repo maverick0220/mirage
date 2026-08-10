@@ -2,8 +2,14 @@
 
 Injects synthetic faults (bias/drift/stuck/variance) into a sub-segment of the
 boiler TEST split (never seen by the trained model), scores it with the trained
-MIRAGE checkpoint, and reports pointwise / event-level / root-cause metrics
-using the injected events as ground truth.
+MIRAGE checkpoint (and optionally statistical baselines), and reports
+pointwise / event-level / root-cause metrics using the injected events as
+ground truth.
+
+Event detection uses a per-variable threshold + debounce rule (a variable must
+stay above its clean-segment quantile for CONFIRM consecutive rows to alarm),
+which is robust to the topq-mean dilution of single-variable faults in the
+65-variable boiler data.
 
 Usage (on the server, inside the mirage venv):
 
@@ -11,11 +17,11 @@ Usage (on the server, inside the mirage venv):
         --run-dir artifacts/rq5_boiler \
         --output artifacts/rq5_injected \
         [--rows 50000] [--events 10] [--duration 800] [--gap 3000] \
-        [--seed 2026] [--device cuda]
+        [--quantile 0.999] [--confirm 5] [--variance-scale 5.0] \
+        [--baselines linear_residual,robust_zscore] [--seed 2026] [--device cuda]
 
-The threshold is taken from the trained run's calibration
-(result.json -> calibration_global_threshold), i.e. calibrated on the clean
-validation split -- no leakage from the injected events.
+Baselines (linear_residual, robust_zscore) are fit on the boiler TRAIN split
+and scored on the same injected segment with the same threshold+debounce rule.
 """
 
 from __future__ import annotations
@@ -30,6 +36,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
+from mirage.baselines.anomaly import LinearResidualDetector, RobustZScore
 from mirage.data.injection import InjectionSpec, inject_fault
 from mirage.data.transforms import RobustScaler
 from mirage.data.window import IndustrialWindowDataset
@@ -44,6 +51,11 @@ from mirage.training.lightning_module import MIRAGELightningModule
 EXCLUDED_VARIABLES = {"FWFUELDIV", "TOTFWFL"}
 
 FAULT_KINDS = ["bias", "drift", "stuck", "variance"]
+
+BASELINE_CLASSES = {
+    "linear_residual": LinearResidualDetector,
+    "robust_zscore": RobustZScore,
+}
 
 
 def _load_scaler_state(data_state_path: Path) -> tuple[RobustScaler, list[str]]:
@@ -75,6 +87,7 @@ def _build_event_plan(
     gap: int,
     start_offset: int,
     rng: np.random.Generator,
+    variance_magnitude: float = 5.0,
 ) -> list[InjectionSpec]:
     if not candidates:
         raise ValueError("no injection candidates (all features are context/excluded?)")
@@ -83,12 +96,37 @@ def _build_event_plan(
     for i in range(n_events):
         variable = candidates[int(rng.integers(0, len(candidates)))]
         kind = FAULT_KINDS[i % len(FAULT_KINDS)]
-        magnitude = {"bias": 10.0, "drift": 10.0, "stuck": 0.0, "variance": 5.0}[kind]
+        magnitude = {"bias": 10.0, "drift": 10.0, "stuck": 0.0, "variance": variance_magnitude}[kind]
         specs.append(
             InjectionSpec(start=cursor, duration=duration, variable=variable, kind=kind, magnitude=magnitude)
         )
         cursor += duration + gap
     return specs
+
+
+def _debounce(exceed: np.ndarray, confirm: int) -> np.ndarray:
+    """1/2D exceedance mask -> confirmed rows (any variable above its threshold
+    for CONFIRM consecutive rows). Returns a 1D bool array."""
+    exceed = np.asarray(exceed, dtype=bool)
+    if exceed.ndim == 1:
+        exceed = exceed[:, None]
+    cum = np.cumsum(exceed, axis=0).astype(np.int64)
+    pad = np.zeros((confirm, exceed.shape[1]), dtype=np.int64)
+    window = cum - np.concatenate([pad, cum[:-confirm]], axis=0)
+    return (window >= confirm).any(axis=1)
+
+
+def _event_summary(
+    labels: np.ndarray,
+    event_score: np.ndarray,
+    threshold: float,
+    span_seconds: float,
+) -> dict[str, float]:
+    metrics = event_detection_metrics(labels, event_score, threshold)
+    metrics["false_alarms_per_day"] = (
+        float(metrics["false_event_count"] * 86400.0 / span_seconds) if span_seconds > 0 else float("nan")
+    )
+    return metrics
 
 
 def _rebuild_model_kwargs(
@@ -167,7 +205,9 @@ def main() -> int:
     parser.add_argument("--gap", type=int, default=3000)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--quantile", type=float, default=0.999, help="per-variable threshold quantile over the clean fraction")
-    parser.add_argument("--confirm", type=int, default=3, help="consecutive rows above threshold required to alarm (debounce)")
+    parser.add_argument("--confirm", type=int, default=5, help="consecutive rows above threshold required to alarm (debounce)")
+    parser.add_argument("--variance-scale", type=float, default=5.0, help="variance-fault magnitude (std multiples)")
+    parser.add_argument("--baselines", default="", help="comma-separated statistical baselines: linear_residual,robust_zscore")
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -210,7 +250,9 @@ def main() -> int:
 
     candidates = _injection_candidates(feature_names, variables_path)
     rng = np.random.default_rng(args.seed)
-    specs = _build_event_plan(candidates, args.events, args.duration, args.gap, window_size + 200, rng)
+    specs = _build_event_plan(
+        candidates, args.events, args.duration, args.gap, window_size + 200, rng, args.variance_scale
+    )
     max_end = specs[-1].start + specs[-1].duration
     if max_end > n:
         print(
@@ -249,12 +291,7 @@ def main() -> int:
         clean_mask = label == 0
         thresholds = np.quantile(local[clean_mask], args.quantile, axis=0)  # (D,)
         exceed = local > thresholds  # (B, D)
-        cum = np.cumsum(exceed, axis=0).astype(np.int64)
-        # exceedance count in the K-row window ending at row i
-        pad = np.zeros((args.confirm, exceed.shape[1]), dtype=np.int64)
-        window = cum - np.concatenate([pad, cum[:-args.confirm]], axis=0)
-        confirmed = window >= args.confirm  # (B, D) variable confirmed at row i
-        event_score = confirmed.any(axis=1).astype(np.float32)
+        event_score = _debounce(exceed, args.confirm).astype(np.float32)
         threshold = 0.5  # binary confirm score
     else:
         clean = label == 0
@@ -270,21 +307,16 @@ def main() -> int:
     frame_out["prediction"] = event_score >= threshold
     frame_out.to_parquet(output_dir / "test_scores.parquet", index=False)
 
-    # --- metrics ---
-    metrics = {"threshold": threshold, "n_injected_events": len(events)}
-    metrics["pointwise"] = pointwise_metrics(label, event_score, threshold)
-    metrics["event"] = event_detection_metrics(label, event_score, threshold)
-    # False alarms normalised by the real time span of the base segment
-    # (row counts are not comparable across datasets of different length).
+    # --- metrics (MIRAGE) ---
+    span_seconds = 0.0
     if "timestamp" in frame:
         parsed = pd.to_datetime(frame["timestamp"], errors="coerce")
-        span_seconds = (parsed.iloc[-1] - parsed.iloc[0]).total_seconds()
-        if span_seconds > 0:
-            metrics["event"]["false_alarms_per_day"] = float(
-                metrics["event"]["false_event_count"] * 86400.0 / span_seconds
-            )
+        span_seconds = float((parsed.iloc[-1] - parsed.iloc[0]).total_seconds())
+    metrics = {"threshold": threshold, "n_injected_events": len(events)}
+    metrics["pointwise"] = pointwise_metrics(label, event_score, threshold)
+    metrics["event"] = _event_summary(label, event_score, threshold, span_seconds)
 
-    # --- root cause ---
+    # --- root cause (MIRAGE, uses local columns) ---
     local_columns = [f"local::{name}" for name in feature_names]
     present_cols = [column for column in local_columns if column in frame_out.columns]
     rankings: list[list[str]] = []
@@ -302,6 +334,34 @@ def main() -> int:
         metrics["root_cause"] = root_cause_metrics(rankings, truths)
         metrics["n_root_cause_events"] = len(rankings)
 
+    # --- baselines (fit on boiler TRAIN, scored on the same injected segment) ---
+    baselines: dict[str, dict] = {}
+    if args.baselines:
+        train_path = test_path.parent / "train.parquet"
+        if not train_path.exists():
+            print(f"train.parquet not found at {train_path} (needed for baseline fit)", file=sys.stderr)
+            return 1
+        train_frame = pd.read_parquet(train_path)
+        train_values = scaler.transform(train_frame[feature_names].to_numpy()).astype(np.float32)
+        for name in (item.strip() for item in args.baselines.split(",") if item.strip()):
+            if name not in BASELINE_CLASSES:
+                print(f"unknown baseline: {name} (choose from {sorted(BASELINE_CLASSES)})", file=sys.stderr)
+                return 1
+            baseline = BASELINE_CLASSES[name]()
+            baseline.fit(train_values, feature_names)
+            raw = np.asarray(baseline.score(injected), dtype=np.float32).reshape(-1)
+            if len(raw) != n:
+                print(f"baseline {name}: score length {len(raw)} != {n}", file=sys.stderr)
+                return 1
+            clean_mask = labels == 0
+            b_threshold = float(np.quantile(raw[clean_mask], args.quantile))
+            b_score = _debounce(raw > b_threshold, args.confirm).astype(np.float32)
+            baselines[name] = {
+                "threshold": b_threshold,
+                "pointwise": pointwise_metrics(labels, b_score, 0.5),
+                "event": _event_summary(labels, b_score, 0.5, span_seconds),
+            }
+
     report = {
         "config": {
             "rows": int(n),
@@ -311,7 +371,11 @@ def main() -> int:
             "seed": args.seed,
             "window_size": window_size,
             "checkpoint": str(checkpoint),
+            "quantile": args.quantile,
+            "confirm": args.confirm,
+            "variance_scale": args.variance_scale,
             "threshold": threshold,
+            "span_seconds": span_seconds,
         },
         "injected_events": [
             {
@@ -324,6 +388,7 @@ def main() -> int:
             for spec in specs
         ],
         "metrics": metrics,
+        "baselines": baselines,
     }
     (output_dir / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
