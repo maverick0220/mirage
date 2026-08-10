@@ -37,6 +37,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from mirage.baselines.anomaly import LinearResidualDetector, RobustZScore
+from mirage.baselines.anomaly.neural import NeuralAnomalyBaseline
 from mirage.data.injection import InjectionSpec, inject_fault
 from mirage.data.transforms import RobustScaler
 from mirage.data.window import IndustrialWindowDataset
@@ -55,6 +56,14 @@ FAULT_KINDS = ["bias", "drift", "stuck", "variance"]
 BASELINE_CLASSES = {
     "linear_residual": LinearResidualDetector,
     "robust_zscore": RobustZScore,
+}
+
+# Deep anomaly-detection baselines of the same family as MIRAGE (fit on the
+# boiler TRAIN split with a neural predictor, scored on the injected segment).
+# A subset is usually enough: gdn (graph-based, closest to MIRAGE), tranad
+# (Transformer), dlinear (linear forecasting), lstm (recurrent).
+NEURAL_BASELINES = {
+    "lstm", "transformer", "anomaly_transformer", "tranad", "dlinear", "gdn", "omnianomaly", "mtad_gat",
 }
 
 
@@ -208,6 +217,8 @@ def main() -> int:
     parser.add_argument("--confirm", type=int, default=5, help="consecutive rows above threshold required to alarm (debounce)")
     parser.add_argument("--variance-scale", type=float, default=5.0, help="variance-fault magnitude (std multiples)")
     parser.add_argument("--baselines", default="", help="comma-separated statistical baselines: linear_residual,robust_zscore")
+    parser.add_argument("--neural-baselines", default="gdn,tranad,dlinear,lstm", help="comma-separated deep baselines (trained on boiler train): gdn,tranad,dlinear,lstm,...")
+    parser.add_argument("--neural-epochs", type=int, default=10, help="training epochs for deep baselines")
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -362,6 +373,46 @@ def main() -> int:
                 "event": _event_summary(labels, b_score, 0.5, span_seconds),
             }
 
+    # --- deep baselines (trained on boiler TRAIN, window-predictive scores) ---
+    neural_results: dict[str, dict] = {}
+    if args.neural_baselines:
+        train_path = test_path.parent / "train.parquet"
+        if not train_path.exists():
+            print(f"train.parquet not found at {train_path} (needed for deep baseline fit)", file=sys.stderr)
+            return 1
+        train_frame = pd.read_parquet(train_path)
+        train_values = scaler.transform(train_frame[feature_names].to_numpy()).astype(np.float32)
+        for name in (item.strip() for item in args.neural_baselines.split(",") if item.strip()):
+            if name not in NEURAL_BASELINES:
+                print(f"unknown neural baseline: {name} (choose from {sorted(NEURAL_BASELINES)})", file=sys.stderr)
+                return 1
+            print(f"[baseline] training {name} on boiler train ...", flush=True)
+            baseline = NeuralAnomalyBaseline(
+                model_name=name,
+                window_size=32,
+                epochs=args.neural_epochs,
+                batch_size=256,
+                seed=args.seed,
+                device=args.device,
+                max_lag=3,
+            )
+            baseline.fit(train_values, feature_names)
+            raw = np.asarray(baseline.score(injected), dtype=np.float32).reshape(-1)
+            if len(raw) > n:
+                print(f"neural baseline {name}: score length {len(raw)} > base rows {n}", file=sys.stderr)
+                return 1
+            aligned = n - len(raw)  # window-predictive baselines drop the first window rows
+            labels_aligned = labels[aligned:]
+            clean_mask = labels_aligned == 0
+            b_threshold = float(np.quantile(raw[clean_mask], args.quantile))
+            b_score = _debounce(raw > b_threshold, args.confirm).astype(np.float32)
+            neural_results[name] = {
+                "threshold": b_threshold,
+                "aligned_rows": aligned,
+                "pointwise": pointwise_metrics(labels_aligned, b_score, 0.5),
+                "event": _event_summary(labels_aligned, b_score, 0.5, span_seconds),
+            }
+
     report = {
         "config": {
             "rows": int(n),
@@ -389,6 +440,7 @@ def main() -> int:
         ],
         "metrics": metrics,
         "baselines": baselines,
+        "neural_baselines": neural_results,
     }
     (output_dir / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
